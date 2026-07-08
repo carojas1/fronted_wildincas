@@ -55,6 +55,7 @@ const statusLabels = {
   income: "Ingreso",
   expense: "Gasto",
   sent: "Enviado",
+  sent_api: "Enviado",
   logged: "Registrado",
   email_error: "Error correo"
 };
@@ -184,7 +185,7 @@ function App() {
         {activeView === "dashboard" && <Dashboard data={data} setView={setView} />}
         {activeView === "rooms" && <Rooms rooms={data.rooms} guests={data.guests} reload={loadAll} onToast={setToast} />}
         {activeView === "guests" && <Guests rooms={data.rooms} guests={data.guests} reload={loadAll} onToast={setToast} />}
-        {activeView === "cleaning" && <Cleaning rooms={data.rooms} incidents={data.incidents} reload={loadAll} />}
+        {activeView === "cleaning" && <Cleaning rooms={data.rooms} incidents={data.incidents} reload={loadAll} onToast={setToast} />}
         {activeView === "logbook" && <Logbook incidents={data.incidents} reload={loadAll} onToast={setToast} />}
         {activeView === "cash" && <Cash data={data} reload={loadAll} onToast={setToast} />}
         {activeView === "income" && <Income movements={data.movements} summary={data.summary} receipts={data.receipts} reload={loadAll} onToast={setToast} />}
@@ -361,11 +362,36 @@ function Guests({ rooms, guests, onToast, reload }) {
   );
 }
 
-function Cleaning({ rooms, incidents }) {
+function Cleaning({ rooms, incidents, reload, onToast }) {
+  const [open, setOpen] = useState(false);
+  const cleaningRooms = rooms.filter((room) => room.status === "cleaning");
+  async function createCleaning(values) {
+    await request(`/rooms/${values.roomId}/cleaning`, { method: "POST", body: JSON.stringify({ notes: values.notes }) });
+    onToast("Tarea de limpieza creada");
+    setOpen(false);
+    reload();
+  }
+  async function completeCleaning(room) {
+    await request(`/rooms/${room.id}/status`, { method: "PATCH", body: JSON.stringify({ status: "available" }) });
+    onToast(`Hab. ${room.id} limpia y disponible`);
+    reload();
+  }
   return (
     <div className="grid two">
-      <section className="panel"><h3>Tareas de limpieza</h3>{rooms.filter((room) => room.status === "cleaning").map((room) => <Task key={room.id} icon={Sparkles} title={`Hab. ${room.id}`} detail={room.notes || "Limpieza pendiente"} status="cleaning" />)}</section>
+      <section className="panel">
+        <div className="panel-title"><h3>Tareas de limpieza</h3><button onClick={() => setOpen(true)}>Nueva tarea</button></div>
+        {cleaningRooms.length === 0 ? <div className="empty"><Sparkles /><span>No hay habitaciones en limpieza</span></div> : cleaningRooms.map((room) => <article className="incident-card" key={room.id}>
+          <Sparkles size={18} />
+          <div>
+            <div className="incident-head"><b>Hab. {room.id}</b><Badge status="cleaning" /></div>
+            <p>{room.notes || "Limpieza pendiente"}</p>
+            <small>{room.type} - Piso {room.floor} - ultima limpieza {room.lastCleaned}</small>
+          </div>
+          <button className="primary" onClick={() => completeCleaning(room)}><Check size={16} /> Lista</button>
+        </article>)}
+      </section>
       <section className="panel"><h3>Mantenimiento</h3>{incidents.filter((item) => item.category === "mantenimiento").map((item) => <Task key={item.id} icon={ClipboardList} title={item.title} detail={item.description} status={item.status} />)}</section>
+      {open && <CleaningModal rooms={rooms} onClose={() => setOpen(false)} onSubmit={createCleaning} />}
     </div>
   );
 }
@@ -476,7 +502,7 @@ function Income({ movements, summary, receipts, reload, onToast }) {
       </div>
       <div className="grid two">
         <section className="panel"><h3>Movimientos</h3><MovementList movements={movements} /></section>
-        <section className="panel"><h3>Comprobantes</h3>{receipts.length === 0 ? <div className="empty"><Receipt /><span>Sin comprobantes enviados todavia</span></div> : receipts.map((item) => <Task key={item.id} icon={Receipt} title={item.guestName} detail={`${item.to} - ${money(item.amount)} - ${item.status}`} status={item.status === "sent" ? "active" : "open"} />)}</section>
+        <section className="panel"><h3>Comprobantes</h3>{receipts.length === 0 ? <div className="empty"><Receipt /><span>Sin comprobantes enviados todavia</span></div> : receipts.map((item) => <Task key={item.id} icon={Receipt} title={item.guestName} detail={`${item.to} - ${money(item.amount)} - ${statusLabels[item.status] || item.status}${item.error ? ` - ${item.error}` : ""}`} status={["sent", "sent_api"].includes(item.status) ? "active" : "open"} />)}</section>
       </div>
       {open && <MovementModal onClose={() => setOpen(false)} onSubmit={createMovement} />}
     </>
@@ -604,6 +630,15 @@ function IncidentModal({ onClose, onSubmit }) {
     <label>CATEGORIA<select value={values.category} onChange={(event) => setValues({ ...values, category: event.target.value })}><option value="general">General</option><option value="incidencia">Incidencia</option><option value="mantenimiento">Mantenimiento</option><option value="huesped">Huesped</option><option value="seguridad">Seguridad</option></select></label>
     <label>PRIORIDAD<select value={values.priority} onChange={(event) => setValues({ ...values, priority: event.target.value })}><option value="baja">Baja</option><option value="media">Media</option><option value="alta">Alta</option></select></label>
     <button className="primary" onClick={() => onSubmit(values)}><Save size={16} /> Registrar novedad</button>
+  </Modal>;
+}
+
+function CleaningModal({ rooms, onClose, onSubmit }) {
+  const [values, setValues] = useState({ roomId: rooms[0]?.id || "", notes: "Limpieza de salida / preparar para nuevo huesped" });
+  return <Modal title="Nueva tarea de limpieza" onClose={onClose}>
+    <label>HABITACION<select value={values.roomId} onChange={(event) => setValues({ ...values, roomId: event.target.value })}>{rooms.map((room) => <option key={room.id} value={room.id}>Hab. {room.id} - {room.type} - {statusLabels[room.status]}</option>)}</select></label>
+    <label>OBSERVACION<input value={values.notes} onChange={(event) => setValues({ ...values, notes: event.target.value })} placeholder="Ej. limpiar bano, cambiar sabanas, revisar control remoto" /></label>
+    <button className="primary" onClick={() => onSubmit(values)}><Sparkles size={16} /> Crear tarea</button>
   </Modal>;
 }
 
