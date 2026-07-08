@@ -142,7 +142,11 @@ function App() {
 
   if (!session) return <Login onLogin={setSession} />;
 
-  const title = nav.find((item) => item.id === view)?.label || "Dashboard";
+  const allowedModules = session.user.modules || [];
+  const canSeeAll = allowedModules.includes("all");
+  const visibleNav = canSeeAll ? nav : nav.filter((item) => allowedModules.includes(item.id));
+  const activeView = visibleNav.some((item) => item.id === view) ? view : visibleNav[0]?.id || "dashboard";
+  const title = nav.find((item) => item.id === activeView)?.label || "Dashboard";
 
   return (
     <div className="app">
@@ -153,11 +157,11 @@ function App() {
         </div>
         <div className="system-pill"><span /> SIMOT - SISTEMA ACTIVO</div>
         <nav>
-          {[...new Set(nav.map((item) => item.group))].map((group) => (
+          {[...new Set(visibleNav.map((item) => item.group))].map((group) => (
             <div key={group} className="nav-group">
               <p>{group}</p>
-              {nav.filter((item) => item.group === group).map((item) => (
-                <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>
+              {visibleNav.filter((item) => item.group === group).map((item) => (
+                <button key={item.id} className={activeView === item.id ? "active" : ""} onClick={() => setView(item.id)}>
                   <item.icon size={18} />
                   <span><b>{item.label}</b><small>{item.hint}</small></span>
                 </button>
@@ -174,18 +178,18 @@ function App() {
       </aside>
       <main>
         <header className="topbar">
-          <div><p>{view === "cash" || view === "income" ? "FINANZAS" : view === "dashboard" ? "PRINCIPAL" : "GESTION"}</p><h1>{title}</h1></div>
+          <div><p>{activeView === "cash" || activeView === "income" ? "FINANZAS" : activeView === "dashboard" ? "PRINCIPAL" : "GESTION"}</p><h1>{title}</h1></div>
           <button className="ghost" onClick={loadAll} disabled={loading}><RefreshCw size={16} /> Actualizar</button>
         </header>
-        {view === "dashboard" && <Dashboard data={data} setView={setView} />}
-        {view === "rooms" && <Rooms rooms={data.rooms} guests={data.guests} reload={loadAll} onToast={setToast} />}
-        {view === "guests" && <Guests rooms={data.rooms} guests={data.guests} reload={loadAll} onToast={setToast} />}
-        {view === "cleaning" && <Cleaning rooms={data.rooms} incidents={data.incidents} reload={loadAll} />}
-        {view === "logbook" && <Logbook incidents={data.incidents} reload={loadAll} />}
-        {view === "cash" && <Cash data={data} reload={loadAll} onToast={setToast} />}
-        {view === "income" && <Income movements={data.movements} summary={data.summary} receipts={data.receipts} reload={loadAll} onToast={setToast} />}
-        {view === "employees" && <Employees employees={data.employees} roles={data.roles} currentShift={data.currentShift} reload={loadAll} onToast={setToast} />}
-        {view === "users" && <UsersAdmin users={data.users} roles={data.roles} reload={loadAll} onToast={setToast} />}
+        {activeView === "dashboard" && <Dashboard data={data} setView={setView} />}
+        {activeView === "rooms" && <Rooms rooms={data.rooms} guests={data.guests} reload={loadAll} onToast={setToast} />}
+        {activeView === "guests" && <Guests rooms={data.rooms} guests={data.guests} reload={loadAll} onToast={setToast} />}
+        {activeView === "cleaning" && <Cleaning rooms={data.rooms} incidents={data.incidents} reload={loadAll} />}
+        {activeView === "logbook" && <Logbook incidents={data.incidents} reload={loadAll} />}
+        {activeView === "cash" && <Cash data={data} reload={loadAll} onToast={setToast} />}
+        {activeView === "income" && <Income movements={data.movements} summary={data.summary} receipts={data.receipts} reload={loadAll} onToast={setToast} />}
+        {activeView === "employees" && <Employees employees={data.employees} roles={data.roles} currentShift={data.currentShift} reload={loadAll} onToast={setToast} />}
+        {activeView === "users" && <UsersAdmin users={data.users} roles={data.roles} reload={loadAll} onToast={setToast} />}
       </main>
       {toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}
     </div>
