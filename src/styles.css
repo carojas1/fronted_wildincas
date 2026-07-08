@@ -336,6 +336,16 @@ main { padding: 30px 38px 50px; overflow: hidden; }
 .section-line small { margin-left: auto; }
 .toolbar, .split-toolbar { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-bottom: 22px; flex-wrap: wrap; }
 .button-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.mini-button {
+  border: 1px solid var(--line);
+  background: #fffdf9;
+  color: var(--brand);
+  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+}
 .search { min-width: min(420px, 100%); background: white; border: 1px solid var(--line); border-radius: 8px; display: flex; align-items: center; gap: 10px; padding: 0 14px; }
 .search input { border: 0; background: transparent; flex: 1; }
 
@@ -368,6 +378,8 @@ main { padding: 30px 38px 50px; overflow: hidden; }
 .inline-stats { flex: 1 1 520px; box-shadow: none; padding: 12px; }
 .stats div { background: var(--cream); border-radius: 8px; padding: 18px; display: grid; gap: 8px; }
 .stats b { font-size: 28px; font-family: Georgia, "Times New Roman", serif; }
+.method-stats { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.method-stats span { color: var(--muted); font-size: 12px; font-weight: 800; }
 .shift-banner { background: var(--brand); color: white; border-radius: 8px; padding: 22px; display: flex; gap: 14px; align-items: center; margin-bottom: 26px; }
 .shift-banner.grow { flex: 1; margin-bottom: 0; }
 .shift-banner small { color: #cbbdb1; display: block; font-weight: 800; }
@@ -375,6 +387,7 @@ main { padding: 30px 38px 50px; overflow: hidden; }
 .employee-card { background: white; border: 1px solid var(--line); border-radius: 8px; padding: 24px; box-shadow: 0 8px 22px rgba(57, 46, 36, .05); }
 .employee-card > div { display: flex; gap: 14px; align-items: center; margin-bottom: 18px; }
 .employee-card p { color: #958a80; margin: 10px 0; }
+.employee-card em { display: block; color: var(--sand); background: var(--cream); border-radius: 8px; padding: 10px; margin-top: 12px; font-style: normal; }
 .employee-card footer { display: flex; justify-content: space-between; border-top: 1px solid var(--line); margin-top: 18px; padding-top: 16px; }
 .toast { position: fixed; right: 22px; bottom: 22px; border: 0; background: var(--brand); color: white; border-radius: 8px; padding: 14px 18px; box-shadow: 0 12px 28px rgba(0,0,0,.16); }
 
@@ -428,6 +441,24 @@ main { padding: 30px 38px 50px; overflow: hidden; }
 .role-card { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: #fffdf9; }
 .role-card p { color: #746a61; margin: 10px 0 0; }
 .email-test { border-top: 1px solid var(--line); padding-top: 18px; margin-top: 18px; display: grid; gap: 12px; }
+.module-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+.module-picker button {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  background: #fbfaf7;
+  color: #70675f;
+  border-radius: 8px;
+  font-weight: 800;
+}
+.module-picker button.selected {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: white;
+}
 
 @media (max-width: 1050px) {
   .app { grid-template-columns: 82px 1fr; }

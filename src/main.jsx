@@ -13,6 +13,7 @@ import {
   Grid2X2,
   LogOut,
   Mail,
+  Pencil,
   Plus,
   Receipt,
   RefreshCw,
@@ -52,7 +53,10 @@ const statusLabels = {
   open: "Abierta",
   resolved: "Resuelta",
   income: "Ingreso",
-  expense: "Gasto"
+  expense: "Gasto",
+  sent: "Enviado",
+  logged: "Registrado",
+  email_error: "Error correo"
 };
 
 const initialData = {
@@ -64,6 +68,7 @@ const initialData = {
   employees: [],
   agenda: {},
   summary: {},
+  daily: {},
   shifts: {},
   receipts: [],
   users: [],
@@ -85,6 +90,15 @@ async function request(path, options = {}) {
   return payload.data;
 }
 
+async function safeRequest(path, fallback) {
+  try {
+    return await request(path);
+  } catch (error) {
+    console.warn(`${path}: ${error.message}`);
+    return fallback;
+  }
+}
+
 function App() {
   const [session, setSession] = useState(() => JSON.parse(localStorage.getItem("simot-session") || "null"));
   const [view, setView] = useState("dashboard");
@@ -95,22 +109,23 @@ function App() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [rooms, guests, movements, incidents, checklist, employees, agenda, summary, shifts, currentShift, receipts, users, roles] = await Promise.all([
-        request("/rooms"),
-        request("/guests"),
-        request("/finance/movements"),
-        request("/operations/incidents"),
-        request("/operations/checklist"),
-        request("/employees"),
-        request("/operations/agenda"),
-        request("/finance/summary"),
-        request("/finance/shifts"),
-        request("/employees/current-shift"),
-        request("/notifications/receipts"),
-        request("/auth/users"),
-        request("/auth/roles")
+      const [rooms, guests, movements, incidents, checklist, employees, agenda, summary, daily, shifts, currentShift, receipts, users, roles] = await Promise.all([
+        safeRequest("/rooms", []),
+        safeRequest("/guests", []),
+        safeRequest("/finance/movements", []),
+        safeRequest("/operations/incidents", []),
+        safeRequest("/operations/checklist", []),
+        safeRequest("/employees", []),
+        safeRequest("/operations/agenda", {}),
+        safeRequest("/finance/summary", {}),
+        safeRequest("/finance/daily", {}),
+        safeRequest("/finance/shifts", {}),
+        safeRequest("/employees/current-shift", null),
+        safeRequest("/notifications/receipts", []),
+        safeRequest("/auth/users", []),
+        safeRequest("/auth/roles", [])
       ]);
-      setData({ rooms, guests, movements, incidents, checklist, employees, agenda, summary, shifts, currentShift, receipts, users, roles });
+      setData({ rooms, guests, movements, incidents, checklist, employees, agenda, summary, daily, shifts, currentShift, receipts, users, roles });
     } catch (error) {
       setToast(error.message);
     } finally {
@@ -250,6 +265,7 @@ function Dashboard({ data, setView }) {
 function Rooms({ rooms, guests, reload, onToast }) {
   const [filter, setFilter] = useState("all");
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
   const byGuest = Object.fromEntries(guests.map((guest) => [guest.id, guest]));
   const filtered = filter === "all" ? rooms : rooms.filter((room) => room.status === filter);
   const floors = [...new Set(filtered.map((room) => room.floor))].sort((a, b) => a - b);
@@ -261,16 +277,24 @@ function Rooms({ rooms, guests, reload, onToast }) {
     reload();
   }
 
+  async function updateRoom(values) {
+    await request(`/rooms/${values.id}`, { method: "PATCH", body: JSON.stringify(values) });
+    onToast("Habitacion actualizada");
+    setEditing(null);
+    reload();
+  }
+
   return (
     <>
       <div className="toolbar"><Filters values={["all", "available", "occupied", "cleaning", "reserved"]} active={filter} onChange={setFilter} /><button className="primary" onClick={() => setOpen(true)}><Plus size={16} /> Nueva habitacion</button></div>
       {floors.map((floor) => (
         <section className="floor" key={floor}>
           <div className="section-line"><span>PISO {floor}</span><small>{filtered.filter((room) => room.floor === floor).length} hab.</small></div>
-          <div className="room-grid">{filtered.filter((room) => room.floor === floor).map((room) => <RoomTile key={room.id} room={room} guest={byGuest[room.guestId]} />)}</div>
+          <div className="room-grid">{filtered.filter((room) => room.floor === floor).map((room) => <RoomTile key={room.id} room={room} guest={byGuest[room.guestId]} onEdit={() => setEditing(room)} />)}</div>
         </section>
       ))}
       {open && <RoomModal onClose={() => setOpen(false)} onSubmit={createRoom} />}
+      {editing && <RoomModal room={editing} onClose={() => setEditing(null)} onSubmit={updateRoom} />}
     </>
   );
 }
@@ -356,18 +380,29 @@ function Cash({ data, reload, onToast }) {
   const [checked, setChecked] = useState({});
   const [initial, setInitial] = useState("");
   const [closed, setClosed] = useState("");
+  const [shift, setShift] = useState("Tarde");
+  const [notes, setNotes] = useState("");
+  const [openMovement, setOpenMovement] = useState(false);
   const allDone = data.checklist.length && data.checklist.every((item) => checked[item.id]);
+  const today = data.daily || {};
 
   async function openCash() {
-    await request("/finance/shifts/open", { method: "POST", body: JSON.stringify({ responsible: "Apolo Administrador", shift: "Tarde", initial: Number(initial || 0) }) });
+    await request("/finance/shifts/open", { method: "POST", body: JSON.stringify({ responsible: "Apolo Administrador", shift, initial: Number(initial || 0), notes }) });
     onToast("Caja abierta");
     reload();
   }
 
   async function closeCash() {
-    await request("/finance/shifts/close", { method: "POST", body: JSON.stringify({ closed: Number(closed || 0) }) });
+    await request("/finance/shifts/close", { method: "POST", body: JSON.stringify({ closed: Number(closed || 0), notes }) });
     onToast("Caja cerrada");
     setClosed("");
+    reload();
+  }
+
+  async function createMovement(values) {
+    await request("/finance/movements", { method: "POST", body: JSON.stringify(values) });
+    onToast("Movimiento de caja registrado");
+    setOpenMovement(false);
     reload();
   }
 
@@ -376,9 +411,11 @@ function Cash({ data, reload, onToast }) {
       <section className="panel">
         <div className="feature-title"><WalletCards /><span><b>{data.shifts.openShift ? "Caja abierta" : "Abrir caja"}</b><small>Turno de recepcion</small></span></div>
         <label>RESPONSABLE<input value={data.shifts.openShift?.responsible || "Apolo Administrador"} readOnly /></label>
-        <label>TURNO<div className="segmented"><button>Manana</button><button className="selected">Tarde</button><button>Noche</button></div></label>
+        <label>TURNO<div className="segmented">{["Manana", "Tarde", "Noche"].map((item) => <button type="button" key={item} className={(data.shifts.openShift?.shift || shift) === item ? "selected" : ""} onClick={() => setShift(item)}>{item}</button>)}</div></label>
         {!data.shifts.openShift && <label>MONTO INICIAL EN CAJA (USD)<input placeholder="0.00" value={initial} onChange={(e) => setInitial(e.target.value)} /></label>}
         {data.shifts.openShift && <label>MONTO DE CIERRE REAL (USD)<input placeholder="0.00" value={closed} onChange={(e) => setClosed(e.target.value)} /></label>}
+        <label>OBSERVACIONES DEL TURNO<input placeholder="Novedades, faltantes, responsable de entrega..." value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+        {data.shifts.openShift && <button className="primary" onClick={() => setOpenMovement(true)}><Plus size={16} /> Registrar ingreso/gasto</button>}
         {data.shifts.openShift && <button className="primary" onClick={closeCash}><Save size={16} /> Cerrar caja</button>}
       </section>
       <section className="panel">
@@ -387,9 +424,19 @@ function Cash({ data, reload, onToast }) {
         <div className="check-footer"><small>{Object.values(checked).filter(Boolean).length} de {data.checklist.length} verificados</small><button className="primary" disabled={!allDone || data.shifts.openShift} onClick={openCash}><WalletCards size={16} /> Abrir caja</button></div>
       </section>
       <section className="panel span-2">
+        <div className="section-line"><span>RESUMEN DEL DIA</span><small>{today.date}</small></div>
+        <div className="stats method-stats">
+          <div><small>Ingresos del dia</small><b>{money(today.income)}</b></div>
+          <div><small>Gastos del dia</small><b>{money(today.expense)}</b></div>
+          <div><small>Balance del dia</small><b>{money(today.balance)}</b></div>
+          {(today.methods || []).map((item) => <div key={item.method}><small>{item.method}</small><b>{money(item.balance)}</b><span>In {money(item.income)} / Out {money(item.expense)}</span></div>)}
+        </div>
+      </section>
+      <section className="panel span-2">
         <div className="section-line"><span>HISTORIAL DE TURNOS</span><small>{data.shifts.history?.length || 0} cerrados</small></div>
         <ShiftTable shifts={data.shifts.history || []} />
       </section>
+      {openMovement && <MovementModal onClose={() => setOpenMovement(false)} onSubmit={createMovement} />}
     </div>
   );
 }
@@ -419,12 +466,13 @@ function Income({ movements, summary, receipts, reload, onToast }) {
 
 function Employees({ employees, roles, currentShift, reload, onToast }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
 
   async function createEmployee(values) {
     const username = values.username || values.email.split("@")[0];
     const password = values.password || `${username}123`;
     const role = roles.find((item) => item.id === values.roleId);
-    await request("/employees", { method: "POST", body: JSON.stringify({ ...values, username, role: role?.name || values.role, modules: role?.modules || [] }) });
+    await request("/employees", { method: "POST", body: JSON.stringify({ ...values, username, role: role?.name || values.role, modules: values.modules?.length ? values.modules : role?.modules || [] }) });
     await request("/auth/users", { method: "POST", body: JSON.stringify({ name: values.name, username, email: values.email, password, roleId: values.roleId }) });
     await request("/notifications/employees/welcome", { method: "POST", body: JSON.stringify({ to: values.email, name: values.name, username, password, role: role?.name }) });
     onToast("Empleado, usuario y correo de bienvenida creados");
@@ -432,11 +480,19 @@ function Employees({ employees, roles, currentShift, reload, onToast }) {
     reload();
   }
 
+  async function updateEmployee(values) {
+    await request(`/employees/${values.id}`, { method: "PATCH", body: JSON.stringify(values) });
+    onToast("Empleado actualizado");
+    setEditing(null);
+    reload();
+  }
+
   return (
     <>
       <div className="toolbar"><div className="shift-banner grow"><CalendarCheck size={18} /><span><small>TURNO {currentShift?.shift?.toUpperCase()} - ACTIVO AHORA</small><b>{currentShift?.name}</b></span></div><button className="primary" onClick={() => setOpen(true)}><Plus size={16} /> Nuevo empleado</button></div>
-      <div className="employee-grid">{employees.map((employee) => <article className="employee-card" key={employee.id}><div><Avatar name={employee.name} /><span><b>{employee.name}</b><small>{employee.role}</small></span></div><p>{employee.shift} - {employee.hours}</p><p>{employee.phone}</p><p>{employee.email}</p><p>{employee.username} - {employee.modules.length} modulos</p><footer><small>Desde {employee.since}</small><Badge status={employee.status} /></footer></article>)}</div>
+      <div className="employee-grid">{employees.map((employee) => <article className="employee-card" key={employee.id}><div><Avatar name={employee.name} /><span><b>{employee.name}</b><small>{employee.role}</small></span><button className="mini-button" onClick={() => setEditing(employee)} title="Editar empleado"><Pencil size={14} /></button></div><p>{employee.shift} - {employee.hours}</p><p>{employee.phone}</p><p>{employee.email}</p><p>{employee.username} - {(employee.modules || []).join(", ")}</p>{employee.note && <em>{employee.note}</em>}<footer><small>Desde {employee.since}</small><Badge status={employee.status} /></footer></article>)}</div>
       {open && <EmployeeModal roles={roles} onClose={() => setOpen(false)} onSubmit={createEmployee} />}
+      {editing && <EmployeeModal employee={editing} roles={roles} onClose={() => setEditing(null)} onSubmit={updateEmployee} />}
     </>
   );
 }
@@ -473,9 +529,13 @@ function UsersAdmin({ users, roles, reload, onToast }) {
   );
 }
 
-function RoomModal({ onClose, onSubmit }) {
-  const [values, setValues] = useState({ id: "", floor: 1, type: "Habitacion Privada", capacity: 2, rate: 35, status: "available", notes: "" });
-  return <Modal title="Nueva habitacion" onClose={onClose}><FormGrid values={values} setValues={setValues} fields={[["id", "Numero"], ["floor", "Piso", "number"], ["type", "Tipo"], ["capacity", "Capacidad", "number"], ["rate", "Tarifa por noche", "number"], ["notes", "Notas"]]} /><button className="primary" onClick={() => onSubmit(values)}><Save size={16} /> Guardar habitacion</button></Modal>;
+function RoomModal({ room, onClose, onSubmit }) {
+  const [values, setValues] = useState(room || { id: "", floor: 1, type: "Habitacion Privada", capacity: 2, rate: 35, status: "available", notes: "" });
+  return <Modal title={room ? "Editar habitacion" : "Nueva habitacion"} onClose={onClose}>
+    <FormGrid values={values} setValues={setValues} fields={[["id", "Numero"], ["floor", "Piso", "number"], ["type", "Tipo"], ["capacity", "Capacidad", "number"], ["rate", "Tarifa por noche", "number"], ["lastCleaned", "Ultima limpieza", "date"], ["notes", "Notas / observaciones"]]} />
+    <label>ESTADO<select value={values.status} onChange={(event) => setValues({ ...values, status: event.target.value })}><option value="available">Disponible</option><option value="occupied">Ocupada</option><option value="cleaning">Limpieza</option><option value="reserved">Reservada</option></select></label>
+    <button className="primary" onClick={() => onSubmit(values)}><Save size={16} /> Guardar habitacion</button>
+  </Modal>;
 }
 
 function GuestModal({ rooms, onClose, onSubmit }) {
@@ -484,8 +544,13 @@ function GuestModal({ rooms, onClose, onSubmit }) {
 }
 
 function MovementModal({ onClose, onSubmit }) {
-  const [values, setValues] = useState({ type: "income", concept: "", method: "Efectivo", amount: 0 });
-  return <Modal title="Movimiento contable" onClose={onClose}><label>TIPO<select value={values.type} onChange={(event) => setValues({ ...values, type: event.target.value })}><option value="income">Ingreso</option><option value="expense">Gasto</option></select></label><FormGrid values={values} setValues={setValues} fields={[["concept", "Concepto"], ["method", "Metodo"], ["amount", "Monto", "number"]]} /><button className="primary" onClick={() => onSubmit(values)}><Save size={16} /> Guardar movimiento</button></Modal>;
+  const [values, setValues] = useState({ type: "income", category: "Hospedaje", concept: "", method: "Efectivo", reference: "", amount: 0, notes: "" });
+  return <Modal title="Movimiento contable" onClose={onClose}>
+    <label>TIPO<select value={values.type} onChange={(event) => setValues({ ...values, type: event.target.value })}><option value="income">Ingreso</option><option value="expense">Gasto</option></select></label>
+    <label>METODO<select value={values.method} onChange={(event) => setValues({ ...values, method: event.target.value })}><option>Efectivo</option><option>Transferencia</option><option>Tarjeta</option><option>Deposito</option></select></label>
+    <FormGrid values={values} setValues={setValues} fields={[["category", "Categoria"], ["concept", "Concepto"], ["reference", "Referencia / comprobante"], ["amount", "Monto", "number"], ["notes", "Observaciones"]]} />
+    <button className="primary" onClick={() => onSubmit(values)}><Save size={16} /> Guardar movimiento</button>
+  </Modal>;
 }
 
 function UserModal({ roles, onClose, onSubmit }) {
@@ -493,12 +558,18 @@ function UserModal({ roles, onClose, onSubmit }) {
   return <Modal title="Nuevo usuario" onClose={onClose}><FormGrid values={values} setValues={setValues} fields={[["name", "Nombre"], ["username", "Usuario"], ["email", "Email"], ["password", "Contrasena", "password"]]} /><label>ROL<select value={values.roleId} onChange={(event) => setValues({ ...values, roleId: event.target.value })}>{roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label><button className="primary" onClick={() => onSubmit(values)}><UserCog size={16} /> Crear usuario</button></Modal>;
 }
 
-function EmployeeModal({ roles, onClose, onSubmit }) {
-  const [values, setValues] = useState({ name: "", role: "Recepcionista", shift: "Tarde", hours: "14:00 - 22:00", phone: "", email: "", username: "", password: "", roleId: "recepcion" });
-  return <Modal title="Nuevo empleado" onClose={onClose}>
-    <FormGrid values={values} setValues={setValues} fields={[["name", "Nombre"], ["role", "Cargo"], ["shift", "Turno"], ["hours", "Horario"], ["phone", "Telefono"], ["email", "Email"], ["username", "Usuario"], ["password", "Contrasena temporal", "password"]]} />
+function EmployeeModal({ employee, roles, onClose, onSubmit }) {
+  const moduleOptions = nav.map((item) => item.id);
+  const [values, setValues] = useState(employee || { name: "", role: "Recepcionista", shift: "Tarde", hours: "14:00 - 22:00", phone: "", email: "", username: "", password: "", roleId: "recepcion", modules: ["dashboard", "rooms"] });
+  function toggleModule(module) {
+    const current = values.modules || [];
+    setValues({ ...values, modules: current.includes(module) ? current.filter((item) => item !== module) : [...current, module] });
+  }
+  return <Modal title={employee ? "Editar empleado" : "Nuevo empleado"} onClose={onClose}>
+    <FormGrid values={values} setValues={setValues} fields={[["name", "Nombre"], ["role", "Cargo"], ["shift", "Turno"], ["hours", "Horario"], ["phone", "Telefono"], ["email", "Email"], ["username", "Usuario"], ["password", "Contrasena temporal", "password"], ["note", "Nota interna"]]} />
     <label>ROL DE ACCESO<select value={values.roleId} onChange={(event) => setValues({ ...values, roleId: event.target.value })}>{roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label>
-    <button className="primary" onClick={() => onSubmit(values)}><UserCog size={16} /> Crear empleado y cuenta</button>
+    <div className="module-picker">{moduleOptions.map((module) => <button type="button" key={module} className={(values.modules || []).includes(module) ? "selected" : ""} onClick={() => toggleModule(module)}>{nav.find((item) => item.id === module)?.label}</button>)}</div>
+    <button className="primary" onClick={() => onSubmit(values)}><UserCog size={16} /> {employee ? "Guardar empleado" : "Crear empleado y cuenta"}</button>
   </Modal>;
 }
 
@@ -514,8 +585,8 @@ function ShiftTable({ shifts }) {
   return <div className="table compact"><div className="tr head"><span>FECHA</span><span>TURNO</span><span>RESPONSABLE</span><span>INICIAL</span><span>CIERRE</span><span>ESPERADO</span><span>DIFERENCIA</span></div>{shifts.map((shift) => <div className="tr" key={shift.id}><span>{shift.date}</span><span><Badge status={shift.shift} /></span><span>{shift.responsible}</span><span>{money(shift.initial)}</span><span><b>{money(shift.closed)}</b></span><span>{money(shift.expected)}</span><span className={shift.difference < 0 ? "red" : "green"}>{money(shift.difference)}</span></div>)}</div>;
 }
 
-function RoomTile({ room, guest, compact = false }) {
-  return <article className={`room-card ${room.status} ${compact ? "compact-room" : ""}`}><div><h3>{room.id}</h3><Badge status={room.status} /></div>{!compact && <><small>PISO {room.floor}</small><p>{room.type}</p><dl><dt>Capacidad</dt><dd>{room.capacity} pers.</dd><dt>Tarifa</dt><dd>{money(room.rate)}/noche</dd><dt>Ultima limpieza</dt><dd>{room.lastCleaned}</dd></dl>{guest && <footer><b>{guest.name}</b><small>Salida: {guest.checkOut} - {guest.exitTime}</small><span>{guest.paid >= guest.total ? "Pagado" : "Parcial"}</span></footer>}{room.notes && <em>{room.notes}</em>}</>}</article>;
+function RoomTile({ room, guest, compact = false, onEdit }) {
+  return <article className={`room-card ${room.status} ${compact ? "compact-room" : ""}`}><div><h3>{room.id}</h3><span className="button-row"><Badge status={room.status} />{onEdit && <button className="mini-button" title="Editar habitacion" onClick={onEdit}><Pencil size={14} /></button>}</span></div>{!compact && <><small>PISO {room.floor}</small><p>{room.type}</p><dl><dt>Capacidad</dt><dd>{room.capacity} pers.</dd><dt>Tarifa</dt><dd>{money(room.rate)}/noche</dd><dt>Ultima limpieza</dt><dd>{room.lastCleaned}</dd></dl>{guest && <footer><b>{guest.name}</b><small>Salida: {guest.checkOut} - {guest.exitTime}</small><span>{guest.paid >= guest.total ? "Pagado" : "Parcial"}</span></footer>}{room.notes && <em>{room.notes}</em>}</>}</article>;
 }
 
 function Task({ icon: Icon, title, detail, status }) {
