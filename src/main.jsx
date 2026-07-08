@@ -18,7 +18,6 @@ import {
   RefreshCw,
   Save,
   Search,
-  Send,
   ShieldCheck,
   Sparkles,
   UserCog,
@@ -170,7 +169,7 @@ function App() {
         {view === "logbook" && <Logbook incidents={data.incidents} reload={loadAll} />}
         {view === "cash" && <Cash data={data} reload={loadAll} onToast={setToast} />}
         {view === "income" && <Income movements={data.movements} summary={data.summary} receipts={data.receipts} reload={loadAll} onToast={setToast} />}
-        {view === "employees" && <Employees employees={data.employees} currentShift={data.currentShift} />}
+        {view === "employees" && <Employees employees={data.employees} roles={data.roles} currentShift={data.currentShift} reload={loadAll} onToast={setToast} />}
         {view === "users" && <UsersAdmin users={data.users} roles={data.roles} reload={loadAll} onToast={setToast} />}
       </main>
       {toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}
@@ -405,17 +404,33 @@ function Income({ movements, summary, receipts, reload, onToast }) {
   );
 }
 
-function Employees({ employees, currentShift }) {
+function Employees({ employees, roles, currentShift, reload, onToast }) {
+  const [open, setOpen] = useState(false);
+
+  async function createEmployee(values) {
+    const username = values.username || values.email.split("@")[0];
+    const password = values.password || `${username}123`;
+    const role = roles.find((item) => item.id === values.roleId);
+    await request("/employees", { method: "POST", body: JSON.stringify({ ...values, username, role: role?.name || values.role, modules: role?.modules || [] }) });
+    await request("/auth/users", { method: "POST", body: JSON.stringify({ name: values.name, username, email: values.email, password, roleId: values.roleId }) });
+    await request("/notifications/employees/welcome", { method: "POST", body: JSON.stringify({ to: values.email, name: values.name, username, password, role: role?.name }) });
+    onToast("Empleado, usuario y correo de bienvenida creados");
+    setOpen(false);
+    reload();
+  }
+
   return (
     <>
-      <div className="shift-banner"><CalendarCheck size={18} /><span><small>TURNO {currentShift?.shift?.toUpperCase()} - ACTIVO AHORA</small><b>{currentShift?.name}</b></span></div>
+      <div className="toolbar"><div className="shift-banner grow"><CalendarCheck size={18} /><span><small>TURNO {currentShift?.shift?.toUpperCase()} - ACTIVO AHORA</small><b>{currentShift?.name}</b></span></div><button className="primary" onClick={() => setOpen(true)}><Plus size={16} /> Nuevo empleado</button></div>
       <div className="employee-grid">{employees.map((employee) => <article className="employee-card" key={employee.id}><div><Avatar name={employee.name} /><span><b>{employee.name}</b><small>{employee.role}</small></span></div><p>{employee.shift} - {employee.hours}</p><p>{employee.phone}</p><p>{employee.email}</p><p>{employee.username} - {employee.modules.length} modulos</p><footer><small>Desde {employee.since}</small><Badge status={employee.status} /></footer></article>)}</div>
+      {open && <EmployeeModal roles={roles} onClose={() => setOpen(false)} onSubmit={createEmployee} />}
     </>
   );
 }
 
 function UsersAdmin({ users, roles, reload, onToast }) {
   const [open, setOpen] = useState(false);
+  const [testEmail, setTestEmail] = useState("");
   async function createUser(values) {
     await request("/auth/users", { method: "POST", body: JSON.stringify(values) });
     onToast("Usuario creado con rol asignado");
@@ -427,12 +442,18 @@ function UsersAdmin({ users, roles, reload, onToast }) {
     onToast("Rol actualizado");
     reload();
   }
+  async function sendTestEmail() {
+    await request("/notifications/test", { method: "POST", body: JSON.stringify({ to: testEmail }) });
+    onToast("Correo de prueba procesado");
+    setTestEmail("");
+    reload();
+  }
   return (
     <>
       <div className="toolbar"><div className="panel slim"><b>Roles operativos</b><small>Administra acceso por modulo como en un ERP real.</small></div><button className="primary" onClick={() => setOpen(true)}><Plus size={16} /> Nuevo usuario</button></div>
       <div className="grid two">
         <section className="panel"><h3>Usuarios del sistema</h3>{users.map((user) => <div className="user-row" key={user.id}><Avatar name={user.name} /><span><b>{user.name}</b><small>{user.username} - {user.email || "sin correo"}</small></span><select value={user.roleId} onChange={(event) => updateRole(user, event.target.value)}>{roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select><Badge status={user.status} /></div>)}</section>
-        <section className="panel"><h3>Permisos por rol</h3>{roles.map((role) => <div className="role-card" key={role.id}><b>{role.name}</b><small>{role.description}</small><p>{role.modules.join(", ")}</p></div>)}</section>
+        <section className="panel"><h3>Permisos por rol</h3>{roles.map((role) => <div className="role-card" key={role.id}><b>{role.name}</b><small>{role.description}</small><p>{role.modules.join(", ")}</p></div>)}<div className="email-test"><label>PROBAR BREVO<input placeholder="correo@ejemplo.com" value={testEmail} onChange={(event) => setTestEmail(event.target.value)} /></label><button className="primary" onClick={sendTestEmail} disabled={!testEmail}><Mail size={16} /> Enviar prueba</button></div></section>
       </div>
       {open && <UserModal roles={roles} onClose={() => setOpen(false)} onSubmit={createUser} />}
     </>
@@ -457,6 +478,15 @@ function MovementModal({ onClose, onSubmit }) {
 function UserModal({ roles, onClose, onSubmit }) {
   const [values, setValues] = useState({ name: "", username: "", email: "", password: "", roleId: roles[0]?.id || "recepcion" });
   return <Modal title="Nuevo usuario" onClose={onClose}><FormGrid values={values} setValues={setValues} fields={[["name", "Nombre"], ["username", "Usuario"], ["email", "Email"], ["password", "Contrasena", "password"]]} /><label>ROL<select value={values.roleId} onChange={(event) => setValues({ ...values, roleId: event.target.value })}>{roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label><button className="primary" onClick={() => onSubmit(values)}><UserCog size={16} /> Crear usuario</button></Modal>;
+}
+
+function EmployeeModal({ roles, onClose, onSubmit }) {
+  const [values, setValues] = useState({ name: "", role: "Recepcionista", shift: "Tarde", hours: "14:00 - 22:00", phone: "", email: "", username: "", password: "", roleId: "recepcion" });
+  return <Modal title="Nuevo empleado" onClose={onClose}>
+    <FormGrid values={values} setValues={setValues} fields={[["name", "Nombre"], ["role", "Cargo"], ["shift", "Turno"], ["hours", "Horario"], ["phone", "Telefono"], ["email", "Email"], ["username", "Usuario"], ["password", "Contrasena temporal", "password"]]} />
+    <label>ROL DE ACCESO<select value={values.roleId} onChange={(event) => setValues({ ...values, roleId: event.target.value })}>{roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label>
+    <button className="primary" onClick={() => onSubmit(values)}><UserCog size={16} /> Crear empleado y cuenta</button>
+  </Modal>;
 }
 
 function FormGrid({ fields, values, setValues }) {

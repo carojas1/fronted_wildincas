@@ -14,3 +14,11 @@ Para Vercel configurar la variable:
 ```text
 VITE_API_URL=https://URL-DE-TU-BACKEND/api
 ```
+
+Valores recomendados en Vercel:
+
+- Framework Preset: `Vite`
+- Root Directory: `./`
+- Build Command: `npm run build`
+- Output Directory: `dist`
+- Install Command: `npm install`
