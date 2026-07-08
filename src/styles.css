@@ -1,15 +1,15 @@
 :root {
-  --bg: #faf8f3;
-  --panel: #fffefd;
-  --ink: #40342d;
-  --muted: #a79f96;
-  --line: #ebe5dc;
-  --brand: #4d392f;
-  --brand-2: #c6a36c;
-  --green: #5d8a70;
-  --rose: #9b7074;
-  --sand: #8f8069;
-  --cream: #f1ede7;
+  --bg: #f6f7f4;
+  --panel: #ffffff;
+  --ink: #26312d;
+  --muted: #7a837d;
+  --line: #dfe5df;
+  --brand: #24483f;
+  --brand-2: #b68b4f;
+  --green: #3f7f63;
+  --rose: #a45d63;
+  --sand: #777061;
+  --cream: #edf1ec;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--ink);
   background: var(--bg);
@@ -23,17 +23,22 @@ button { cursor: pointer; }
 .login {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: minmax(360px, 0.95fr) 1.05fr;
-  background: #fcfbf8;
+  grid-template-columns: minmax(440px, 0.9fr) 1.1fr;
+  background:
+    linear-gradient(135deg, rgba(36, 72, 63, .08), rgba(182, 139, 79, .08)),
+    #f8faf7;
 }
 
 .login-brand {
-  background: #2f2119;
-  color: #ead49e;
-  padding: 58px 8vw;
+  background:
+    linear-gradient(160deg, rgba(12, 33, 30, .88), rgba(36, 72, 63, .94)),
+    url("data:image/svg+xml,%3Csvg width='180' height='180' viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%23d7b46b' stroke-opacity='.15'%3E%3Cpath d='M22 90h136M90 22v136'/%3E%3Ccircle cx='90' cy='90' r='46'/%3E%3C/g%3E%3C/svg%3E");
+  color: #f7f1df;
+  padding: 56px clamp(34px, 6vw, 86px);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  gap: 48px;
 }
 
 .login-brand p, .login-brand h2, .login-brand footer, .topbar p, .nav-group p, label, .section-line span, .section-line small {
@@ -43,33 +48,107 @@ button { cursor: pointer; }
   font-weight: 700;
 }
 
-.login-brand h1 {
-  font-family: Georgia, "Times New Roman", serif;
-  font-style: italic;
-  font-size: clamp(70px, 9vw, 132px);
-  line-height: 0.85;
-  margin: 50px 0 24px;
+.login-brand-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
 }
 
-.login-brand h2 { color: #9f845d; }
-.login-brand .mark { font-size: 40px; color: #a98950; }
-.login-brand footer { display: flex; justify-content: space-between; border-bottom: 1px solid #bca77b; padding-bottom: 36px; color: #75675a; }
+.login-brand-head span {
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(247, 241, 223, .35);
+  background: rgba(255, 255, 255, .08);
+  color: #f2d390;
+  font-weight: 900;
+}
+
+.login-brand-head p { color: rgba(247, 241, 223, .68); text-transform: uppercase; }
+.login-brand-main small {
+  display: inline-flex;
+  color: #f2d390;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+
+.login-brand h1 {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: clamp(54px, 7vw, 94px);
+  line-height: 0.98;
+  margin: 0 0 18px;
+  max-width: 560px;
+}
+
+.login-brand h2 {
+  color: rgba(247, 241, 223, .72);
+  font-size: clamp(18px, 2vw, 26px);
+  max-width: 520px;
+}
+
+.login-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  border-top: 1px solid rgba(247, 241, 223, .24);
+  padding-top: 22px;
+}
+
+.login-metrics span {
+  display: grid;
+  gap: 5px;
+}
+
+.login-metrics b {
+  color: #f2d390;
+  font-size: 22px;
+}
+
+.login-metrics small {
+  color: rgba(247, 241, 223, .62);
+  font-size: 12px;
+  font-weight: 800;
+}
 
 .login-form {
-  width: min(430px, 86vw);
+  width: min(520px, 88vw);
   margin: auto;
   display: grid;
-  gap: 22px;
+  gap: 20px;
+  background: rgba(255, 255, 255, .82);
+  border: 1px solid rgba(223, 229, 223, .9);
+  border-radius: 8px;
+  box-shadow: 0 28px 70px rgba(38, 49, 45, .12);
+  padding: clamp(28px, 4vw, 48px);
 }
 
 .login-form h2, .topbar h1 {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 38px;
   margin: 0;
 }
 
+.login-kicker {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #d9e4dc;
+  background: #eef5f0;
+  color: var(--green);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .login-form p { margin: 0; color: var(--muted); font-weight: 800; font-size: 12px; }
-.login-form > span { color: #b8b0a8; margin-top: -14px; }
+.login-form > span { color: var(--muted); margin-top: -10px; line-height: 1.5; }
 
 label { display: grid; gap: 9px; color: #7a6f65; }
 input, select {
@@ -97,6 +176,25 @@ input:focus, select:focus { border-color: #ceb789; box-shadow: 0 0 0 3px #e9ddc5
   padding: 0 18px;
   text-decoration: none;
 }
+
+.login-trust {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  color: #64706a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.login-trust span {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.login-trust svg { color: var(--green); }
 .primary:disabled { opacity: .45; cursor: not-allowed; }
 .error, .red { color: var(--rose); }
 .green { color: var(--green); }

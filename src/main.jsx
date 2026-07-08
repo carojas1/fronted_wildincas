@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import "./styles.css";
 
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8080/api";
+const API = import.meta.env.VITE_API_URL || "https://backend-wildincas.onrender.com/api";
 
 const nav = [
   { id: "dashboard", label: "Dashboard", hint: "Vista general", icon: Grid2X2, group: "PRINCIPAL" },
@@ -196,21 +196,34 @@ function Login({ onLogin }) {
   return (
     <div className="login">
       <section className="login-brand">
-        <p>CUENCA - ECUADOR</p>
-        <div className="mark">+</div>
-        <h1>Wild<br />Incas</h1>
-        <h2>BACKPACKERS HOSTAL</h2>
-        <footer><span>SISTEMA<br />SIMOT v2.0</span><span>EQUIPO<br />J. Gutierrez<br />C. Rojas Benavides<br />R. Padilla</span></footer>
+        <div className="login-brand-head">
+          <span>WI</span>
+          <p>Cuenca, Ecuador</p>
+        </div>
+        <div className="login-brand-main">
+          <small>Plataforma hotelera</small>
+          <h1>Wild Incas</h1>
+          <h2>Control operativo y financiero</h2>
+        </div>
+        <div className="login-metrics">
+          <span><b>24/7</b><small>Recepcion</small></span>
+          <span><b>ERP</b><small>Microservicios</small></span>
+          <span><b>SSL</b><small>Acceso seguro</small></span>
+        </div>
       </section>
       <form onSubmit={submit} className="login-form">
-        <p>ACCESO AL SISTEMA</p>
-        <h2>Bienvenido</h2>
-        <span>Ingresa tus credenciales para continuar</span>
+        <div className="login-kicker"><ShieldCheck size={18} /> Verificacion de usuarios</div>
+        <h2>Acceso administrativo</h2>
+        <span>Ingresa con una cuenta autorizada para operar recepcion, habitaciones, caja y reportes.</span>
         <label>USUARIO<input value={username} onChange={(event) => setUsername(event.target.value)} /></label>
         <label>CONTRASENA<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
         <button>Ingresar al sistema</button>
         {error && <small className="error">{error}</small>}
-        <small>SIMOT v2.0 - Wild Incas Backpackers Hostal</small>
+        <div className="login-trust">
+          <span><Check size={15} /> Roles por modulo</span>
+          <span><Mail size={15} /> Correos transaccionales</span>
+          <span><Receipt size={15} /> Comprobantes y caja</span>
+        </div>
       </form>
     </div>
   );
