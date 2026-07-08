@@ -360,6 +360,19 @@ main { padding: 30px 38px 50px; overflow: hidden; }
 
 .task { display: grid; grid-template-columns: 28px 1fr auto; gap: 14px; align-items: center; padding: 15px 0; border-top: 1px solid #f0ece6; }
 .task:first-of-type { border-top: 0; }
+.incident-card {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 16px;
+  align-items: start;
+  padding: 18px 0;
+  border-top: 1px solid #f0ece6;
+}
+.incident-card:first-child { border-top: 0; }
+.incident-card p { margin: 7px 0; color: #5e564f; }
+.incident-card small { color: var(--muted); font-size: 12px; }
+.incident-card em { display: block; margin-top: 8px; color: var(--sand); font-style: normal; font-weight: 800; }
+.incident-head { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
 .emptyish { min-height: 210px; display: grid; align-content: center; }
 .empty { color: #d0c8bf; display: grid; justify-items: center; gap: 12px; }
 .empty svg { width: 36px; height: 36px; }
@@ -441,6 +454,17 @@ main { padding: 30px 38px 50px; overflow: hidden; }
 .role-card { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: #fffdf9; }
 .role-card p { color: #746a61; margin: 10px 0 0; }
 .email-test { border-top: 1px solid var(--line); padding-top: 18px; margin-top: 18px; display: grid; gap: 12px; }
+.quote-box {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  border: 1px solid var(--line);
+  background: var(--cream);
+  border-radius: 8px;
+  padding: 14px;
+}
+.quote-box span { display: grid; gap: 4px; color: var(--muted); font-size: 12px; font-weight: 800; }
+.quote-box b { color: var(--brand); font-size: 18px; }
 .module-picker {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));

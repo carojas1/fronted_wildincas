@@ -185,7 +185,7 @@ function App() {
         {activeView === "rooms" && <Rooms rooms={data.rooms} guests={data.guests} reload={loadAll} onToast={setToast} />}
         {activeView === "guests" && <Guests rooms={data.rooms} guests={data.guests} reload={loadAll} onToast={setToast} />}
         {activeView === "cleaning" && <Cleaning rooms={data.rooms} incidents={data.incidents} reload={loadAll} />}
-        {activeView === "logbook" && <Logbook incidents={data.incidents} reload={loadAll} />}
+        {activeView === "logbook" && <Logbook incidents={data.incidents} reload={loadAll} onToast={setToast} />}
         {activeView === "cash" && <Cash data={data} reload={loadAll} onToast={setToast} />}
         {activeView === "income" && <Income movements={data.movements} summary={data.summary} receipts={data.receipts} reload={loadAll} onToast={setToast} />}
         {activeView === "employees" && <Employees employees={data.employees} roles={data.roles} currentShift={data.currentShift} reload={loadAll} onToast={setToast} />}
@@ -321,8 +321,14 @@ function Guests({ rooms, guests, onToast, reload }) {
     const paid = Number(values.paid || 0);
     await request("/guests", { method: "POST", body: JSON.stringify({ ...values, roomType: room?.type || "", total, paid, status: "active" }) });
     if (values.roomId) await request(`/rooms/${values.roomId}/status`, { method: "PATCH", body: JSON.stringify({ status: "occupied" }) });
-    if (paid > 0) await request("/finance/movements", { method: "POST", body: JSON.stringify({ type: "income", concept: `Check-in Hab. ${values.roomId} - ${values.name}`, method: values.method || "Efectivo", amount: paid }) });
-    if (paid > 0 && values.email) await request("/notifications/receipts", { method: "POST", body: JSON.stringify({ to: values.email, guestName: values.name, amount: paid, concept: `Hospedaje Hab. ${values.roomId}` }) });
+    if (paid > 0) await request("/finance/movements", { method: "POST", body: JSON.stringify({ type: "income", category: "Hospedaje", concept: `Check-in Hab. ${values.roomId} - ${values.name}`, method: values.method || "Efectivo", reference: values.documentNumber, amount: paid, notes: `Entrada ${values.checkIn}, salida ${values.checkOut}` }) });
+    if (paid > 0 && values.email) {
+      try {
+        await request("/notifications/receipts", { method: "POST", body: JSON.stringify({ to: values.email, guestName: values.name, documentNumber: values.documentNumber, amount: paid, concept: `Hospedaje Hab. ${values.roomId} - ${values.checkIn} a ${values.checkOut}` }) });
+      } catch (error) {
+        onToast(`Huesped registrado. Correo pendiente: ${error.message}`);
+      }
+    }
     onToast("Huesped registrado y comprobante procesado");
     setOpen(false);
     reload();
@@ -350,7 +356,7 @@ function Guests({ rooms, guests, onToast, reload }) {
           </div>
         ))}
       </div>
-      {open && <GuestModal rooms={rooms.filter((room) => room.status !== "occupied")} onClose={() => setOpen(false)} onSubmit={createGuest} />}
+      {open && <GuestModal rooms={rooms.filter((room) => room.status === "available")} onClose={() => setOpen(false)} onSubmit={createGuest} />}
     </section>
   );
 }
@@ -364,18 +370,27 @@ function Cleaning({ rooms, incidents }) {
   );
 }
 
-function Logbook({ incidents, reload }) {
+function Logbook({ incidents, reload, onToast }) {
   const [status, setStatus] = useState("open");
   const [category, setCategory] = useState("all");
+  const [open, setOpen] = useState(false);
   const filtered = incidents.filter((item) => (status === "all" || item.status === status) && (category === "all" || item.category === category));
-  async function createIncident() {
-    await request("/operations/incidents", { method: "POST", body: JSON.stringify({ title: "Novedad de turno", description: "Registro creado desde frontend local.", category: "general", createdBy: "Apolo" }) });
+  async function createIncident(values) {
+    await request("/operations/incidents", { method: "POST", body: JSON.stringify(values) });
+    onToast("Novedad registrada");
+    setOpen(false);
+    reload();
+  }
+  async function completeIncident(item) {
+    await request(`/operations/incidents/${item.id}/resolve`, { method: "PATCH", body: JSON.stringify({ resolution: "Completado desde bitacora", resolvedBy: "Apolo Administrador" }) });
+    onToast("Novedad completada");
     reload();
   }
   return (
     <>
-      <div className="split-toolbar"><Filters values={["open", "resolved", "all"]} active={status} onChange={setStatus} /><Filters values={["all", "incidencia", "mantenimiento", "huesped", "seguridad", "general"]} active={category} onChange={setCategory} /><button className="primary" onClick={createIncident}><Plus size={16} /> Nueva novedad</button></div>
-      <section className="panel emptyish">{filtered.length === 0 ? <div className="empty"><ClipboardList /><span>No hay novedades con estos filtros</span></div> : filtered.map((item) => <Task key={item.id} icon={ClipboardList} title={item.title} detail={item.description} status={item.status} />)}</section>
+      <div className="split-toolbar"><Filters values={["open", "resolved", "all"]} active={status} onChange={setStatus} /><Filters values={["all", "incidencia", "mantenimiento", "huesped", "seguridad", "general"]} active={category} onChange={setCategory} /><button className="primary" onClick={() => setOpen(true)}><Plus size={16} /> Nueva novedad</button></div>
+      <section className="panel emptyish">{filtered.length === 0 ? <div className="empty"><ClipboardList /><span>No hay novedades con estos filtros</span></div> : filtered.map((item) => <IncidentCard key={item.id} item={item} onComplete={() => completeIncident(item)} />)}</section>
+      {open && <IncidentModal onClose={() => setOpen(false)} onSubmit={createIncident} />}
     </>
   );
 }
@@ -543,8 +558,25 @@ function RoomModal({ room, onClose, onSubmit }) {
 }
 
 function GuestModal({ rooms, onClose, onSubmit }) {
-  const [values, setValues] = useState({ name: "", country: "", documentType: "Pasaporte", documentNumber: "", email: "", roomId: rooms[0]?.id || "", checkIn: new Date().toISOString().slice(0, 10), checkOut: "", exitTime: "11:00", paid: 0, total: 0, method: "Efectivo" });
-  return <Modal title="Nuevo huesped" onClose={onClose}><FormGrid values={values} setValues={setValues} fields={[["name", "Nombre"], ["country", "Nacionalidad"], ["documentType", "Documento"], ["documentNumber", "Numero"], ["email", "Email"], ["checkIn", "Entrada", "date"], ["checkOut", "Salida", "date"], ["exitTime", "Hora salida"], ["paid", "Pagado", "number"], ["total", "Total", "number"]]} /><label>HABITACION<select value={values.roomId} onChange={(event) => setValues({ ...values, roomId: event.target.value })}>{rooms.map((room) => <option key={room.id} value={room.id}>Hab. {room.id} - {room.type} - {money(room.rate)}</option>)}</select></label><button className="primary" onClick={() => onSubmit(values)}><Save size={16} /> Registrar huesped</button></Modal>;
+  const [values, setValues] = useState({ name: "", country: "", documentType: "Cedula", documentNumber: "", email: "", roomId: rooms[0]?.id || "", checkIn: new Date().toISOString().slice(0, 10), checkOut: "", exitTime: "11:00", paid: 0, total: rooms[0]?.rate || 0, method: "Efectivo" });
+  const selectedRoom = rooms.find((room) => room.id === values.roomId);
+  const nights = Math.max(1, Math.ceil((new Date(values.checkOut || values.checkIn) - new Date(values.checkIn)) / 86400000) || 1);
+  const calculatedTotal = Number(selectedRoom?.rate || 0) * nights;
+  function update(next) {
+    const room = rooms.find((item) => item.id === (next.roomId || values.roomId));
+    const checkIn = next.checkIn || values.checkIn;
+    const checkOut = next.checkOut || values.checkOut || checkIn;
+    const stay = Math.max(1, Math.ceil((new Date(checkOut) - new Date(checkIn)) / 86400000) || 1);
+    setValues({ ...values, ...next, total: Number(room?.rate || 0) * stay });
+  }
+  return <Modal title="Nuevo ingreso / check-in" onClose={onClose}>
+    {rooms.length === 0 && <div className="empty"><BedDouble /><span>No hay habitaciones disponibles. Libera o crea una habitacion primero.</span></div>}
+    <FormGrid values={values} setValues={setValues} fields={[["name", "Nombre del cliente"], ["country", "Nacionalidad"], ["documentType", "Tipo documento"], ["documentNumber", "Cedula / pasaporte"], ["email", "Correo para factura"], ["checkIn", "Fecha entrada", "date"], ["checkOut", "Fecha salida", "date"], ["exitTime", "Hora salida"], ["paid", "Valor pagado", "number"]]} customSetValues={update} />
+    <label>HABITACION DISPONIBLE<select value={values.roomId} onChange={(event) => update({ roomId: event.target.value })}>{rooms.map((room) => <option key={room.id} value={room.id}>Hab. {room.id} - {room.type} - {money(room.rate)}/noche</option>)}</select></label>
+    <label>METODO DE PAGO<select value={values.method} onChange={(event) => setValues({ ...values, method: event.target.value })}><option>Efectivo</option><option>Transferencia</option><option>Tarjeta</option><option>Deposito</option></select></label>
+    <div className="quote-box"><span>Noches: <b>{nights}</b></span><span>Tarifa: <b>{money(selectedRoom?.rate)}</b></span><span>Total calculado: <b>{money(calculatedTotal)}</b></span></div>
+    <button className="primary" disabled={!rooms.length} onClick={() => onSubmit({ ...values, total: calculatedTotal })}><Save size={16} /> Registrar ingreso y emitir comprobante</button>
+  </Modal>;
 }
 
 function MovementModal({ onClose, onSubmit }) {
@@ -554,6 +586,24 @@ function MovementModal({ onClose, onSubmit }) {
     <label>METODO<select value={values.method} onChange={(event) => setValues({ ...values, method: event.target.value })}><option>Efectivo</option><option>Transferencia</option><option>Tarjeta</option><option>Deposito</option></select></label>
     <FormGrid values={values} setValues={setValues} fields={[["category", "Categoria"], ["concept", "Concepto"], ["reference", "Referencia / comprobante"], ["amount", "Monto", "number"], ["notes", "Observaciones"]]} />
     <button className="primary" onClick={() => onSubmit(values)}><Save size={16} /> Guardar movimiento</button>
+  </Modal>;
+}
+
+function IncidentModal({ onClose, onSubmit }) {
+  const [values, setValues] = useState({
+    title: "",
+    description: "",
+    category: "general",
+    priority: "media",
+    roomId: "",
+    createdBy: "Apolo Administrador",
+    actionRequired: ""
+  });
+  return <Modal title="Nueva novedad de turno" onClose={onClose}>
+    <FormGrid values={values} setValues={setValues} fields={[["title", "Que paso"], ["description", "Detalle de la novedad"], ["roomId", "Habitacion relacionada"], ["createdBy", "Reportado por"], ["actionRequired", "Que hay que hacer"]]} />
+    <label>CATEGORIA<select value={values.category} onChange={(event) => setValues({ ...values, category: event.target.value })}><option value="general">General</option><option value="incidencia">Incidencia</option><option value="mantenimiento">Mantenimiento</option><option value="huesped">Huesped</option><option value="seguridad">Seguridad</option></select></label>
+    <label>PRIORIDAD<select value={values.priority} onChange={(event) => setValues({ ...values, priority: event.target.value })}><option value="baja">Baja</option><option value="media">Media</option><option value="alta">Alta</option></select></label>
+    <button className="primary" onClick={() => onSubmit(values)}><Save size={16} /> Registrar novedad</button>
   </Modal>;
 }
 
@@ -577,8 +627,9 @@ function EmployeeModal({ employee, roles, onClose, onSubmit }) {
   </Modal>;
 }
 
-function FormGrid({ fields, values, setValues }) {
-  return <div className="form-grid">{fields.map(([key, label, type = "text"]) => <label key={key}>{label.toUpperCase()}<input type={type} value={values[key] ?? ""} onChange={(event) => setValues({ ...values, [key]: type === "number" ? Number(event.target.value) : event.target.value })} /></label>)}</div>;
+function FormGrid({ fields, values, setValues, customSetValues }) {
+  const update = customSetValues || setValues;
+  return <div className="form-grid">{fields.map(([key, label, type = "text"]) => <label key={key}>{label.toUpperCase()}<input type={type} value={values[key] ?? ""} onChange={(event) => update({ ...values, [key]: type === "number" ? Number(event.target.value) : event.target.value })} /></label>)}</div>;
 }
 
 function Modal({ title, children, onClose }) {
@@ -595,6 +646,21 @@ function RoomTile({ room, guest, compact = false, onEdit }) {
 
 function Task({ icon: Icon, title, detail, status }) {
   return <div className="task"><Icon size={17} /><span><b>{title}</b><small>{detail}</small></span><Badge status={status} /></div>;
+}
+
+function IncidentCard({ item, onComplete }) {
+  const created = item.createdAt ? new Date(item.createdAt).toLocaleString("es-EC") : "";
+  return <article className="incident-card">
+    <ClipboardList size={18} />
+    <div>
+      <div className="incident-head"><b>{item.title}</b><Badge status={item.status} /></div>
+      <p>{item.description}</p>
+      <small>{created} - {item.createdBy || "Recepcion"}{item.roomId ? ` - Hab. ${item.roomId}` : ""}</small>
+      {item.actionRequired && <em>Accion: {item.actionRequired}</em>}
+      {item.resolution && <em>Resolucion: {item.resolution}</em>}
+    </div>
+    {item.status !== "resolved" && <button className="primary" onClick={onComplete}><Check size={16} /> Completar</button>}
+  </article>;
 }
 
 function PanelTitle({ title, action, onClick }) {
