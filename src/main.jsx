@@ -315,8 +315,9 @@ function Guests({ rooms, guests, onToast, reload }) {
   const filtered = guests.filter((guest) => (status === "all" || guest.status === status) && [guest.name, guest.documentNumber, guest.email].some((value) => String(value || "").toLowerCase().includes(q.toLowerCase())));
 
   async function sendReceipt(guest) {
-    await request("/notifications/receipts", { method: "POST", body: JSON.stringify({ to: guest.email, guestName: guest.name, amount: guest.paid, concept: `Hospedaje Hab. ${guest.roomId || "-"}` }) });
-    onToast(`Comprobante preparado para ${guest.email}`);
+    const receipt = await request("/notifications/receipts", { method: "POST", body: JSON.stringify({ to: guest.email, guestName: guest.name, amount: guest.paid, concept: `Hospedaje Hab. ${guest.roomId || "-"}` }) });
+    const sent = ["sent", "sent_api"].includes(receipt.status);
+    onToast(sent ? `Comprobante enviado a ${guest.email}` : `Comprobante registrado. Brevo: ${receipt.error || receipt.status}`);
     reload();
   }
 
@@ -350,8 +351,16 @@ function Guests({ rooms, guests, onToast, reload }) {
   async function addPayment(guest, values) {
     const result = await request(`/guests/${guest.id}/payment`, { method: "POST", body: JSON.stringify(values) });
     await request("/finance/movements", { method: "POST", body: JSON.stringify({ type: "income", category: "Hospedaje", concept: `Pago Hab. ${guest.roomId || "-"} - ${guest.name}`, method: values.method, reference: guest.documentNumber, amount: Number(values.amount || 0), notes: values.note || "Pago desde ficha de huesped" }) });
-    if (guest.email) await request("/notifications/receipts", { method: "POST", body: JSON.stringify({ to: guest.email, guestName: guest.name, documentNumber: guest.documentNumber, amount: Number(values.amount || 0), concept: `Pago hospedaje Hab. ${guest.roomId || "-"}` }) });
-    onToast(`Pago registrado. Cambio: ${money(result.payment.change)}`);
+    let mailWarning = "";
+    if (guest.email) {
+      try {
+        const receipt = await request("/notifications/receipts", { method: "POST", body: JSON.stringify({ to: guest.email, guestName: guest.name, documentNumber: guest.documentNumber, amount: Number(values.amount || 0), concept: `Pago hospedaje Hab. ${guest.roomId || "-"}` }) });
+        if (!["sent", "sent_api"].includes(receipt.status)) mailWarning = ` Correo pendiente: ${receipt.error || receipt.status}.`;
+      } catch (error) {
+        mailWarning = ` Correo pendiente: ${error.message}.`;
+      }
+    }
+    onToast(`Pago registrado. Cambio: ${money(result.payment.change)}.${mailWarning}`);
     setPaymentGuest(null);
     reload();
   }
