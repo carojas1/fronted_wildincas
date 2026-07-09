@@ -308,6 +308,10 @@ function Guests({ rooms, guests, onToast, reload }) {
   const [status, setStatus] = useState("all");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [paymentGuest, setPaymentGuest] = useState(null);
+  const [detailGuest, setDetailGuest] = useState(null);
+  const [quick, setQuick] = useState(false);
   const filtered = guests.filter((guest) => (status === "all" || guest.status === status) && [guest.name, guest.documentNumber, guest.email].some((value) => String(value || "").toLowerCase().includes(q.toLowerCase())));
 
   async function sendReceipt(guest) {
@@ -332,6 +336,30 @@ function Guests({ rooms, guests, onToast, reload }) {
     }
     onToast("Huesped registrado y comprobante procesado");
     setOpen(false);
+    setQuick(false);
+    reload();
+  }
+
+  async function updateGuest(values) {
+    await request(`/guests/${values.id}`, { method: "PATCH", body: JSON.stringify(values) });
+    onToast("Huesped actualizado");
+    setEditing(null);
+    reload();
+  }
+
+  async function addPayment(guest, values) {
+    const result = await request(`/guests/${guest.id}/payment`, { method: "POST", body: JSON.stringify(values) });
+    await request("/finance/movements", { method: "POST", body: JSON.stringify({ type: "income", category: "Hospedaje", concept: `Pago Hab. ${guest.roomId || "-"} - ${guest.name}`, method: values.method, reference: guest.documentNumber, amount: Number(values.amount || 0), notes: values.note || "Pago desde ficha de huesped" }) });
+    if (guest.email) await request("/notifications/receipts", { method: "POST", body: JSON.stringify({ to: guest.email, guestName: guest.name, documentNumber: guest.documentNumber, amount: Number(values.amount || 0), concept: `Pago hospedaje Hab. ${guest.roomId || "-"}` }) });
+    onToast(`Pago registrado. Cambio: ${money(result.payment.change)}`);
+    setPaymentGuest(null);
+    reload();
+  }
+
+  async function checkoutGuest(guest) {
+    await request(`/guests/${guest.id}/checkout`, { method: "POST", body: JSON.stringify({}) });
+    if (guest.roomId) await request(`/rooms/${guest.roomId}/cleaning`, { method: "POST", body: JSON.stringify({ notes: `Salida de ${guest.name}. Limpiar y preparar habitacion.` }) });
+    onToast(`Salida registrada. Hab. ${guest.roomId} enviada a limpieza`);
     reload();
   }
 
@@ -340,6 +368,7 @@ function Guests({ rooms, guests, onToast, reload }) {
       <div className="toolbar">
         <div className="search"><Search size={17} /><input placeholder="Nombre, documento o email..." value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <Filters values={["all", "active", "reserved", "checkout"]} active={status} onChange={setStatus} />
+        <button className="ghost" onClick={() => setQuick(true)}><WalletCards size={16} /> Ingreso rapido</button>
         <button className="primary" onClick={() => setOpen(true)}><Plus size={16} /> Nuevo huesped</button>
       </div>
       <div className="table">
@@ -353,11 +382,15 @@ function Guests({ rooms, guests, onToast, reload }) {
             <span>{guest.exitTime}</span>
             <span><b className="green">{money(guest.paid)}</b> / {money(guest.total)}<small>{guest.paid < guest.total ? "Pendiente" : "Pagado"}</small></span>
             <span><Badge status={guest.status} /></span>
-            <span className="actions"><button title="Ver"><Eye size={15} /></button><button title="Enviar comprobante" onClick={() => sendReceipt(guest)}><Mail size={15} /></button></span>
+            <span className="actions"><button title="Ver historial" onClick={() => setDetailGuest(guest)}><Eye size={15} /></button><button title="Editar" onClick={() => setEditing(guest)}><Pencil size={15} /></button><button title="Registrar pago" onClick={() => setPaymentGuest(guest)}><WalletCards size={15} /></button><button title="Salida" onClick={() => checkoutGuest(guest)}><LogOut size={15} /></button><button title="Enviar comprobante" onClick={() => sendReceipt(guest)}><Mail size={15} /></button></span>
           </div>
         ))}
       </div>
       {open && <GuestModal rooms={rooms.filter((room) => room.status === "available")} onClose={() => setOpen(false)} onSubmit={createGuest} />}
+      {quick && <GuestModal quick rooms={rooms.filter((room) => room.status === "available")} onClose={() => setQuick(false)} onSubmit={createGuest} />}
+      {editing && <GuestEditModal guest={editing} onClose={() => setEditing(null)} onSubmit={updateGuest} />}
+      {paymentGuest && <PaymentModal guest={paymentGuest} onClose={() => setPaymentGuest(null)} onSubmit={(values) => addPayment(paymentGuest, values)} />}
+      {detailGuest && <GuestDetailModal guest={detailGuest} onClose={() => setDetailGuest(null)} />}
     </section>
   );
 }
@@ -583,8 +616,8 @@ function RoomModal({ room, onClose, onSubmit }) {
   </Modal>;
 }
 
-function GuestModal({ rooms, onClose, onSubmit }) {
-  const [values, setValues] = useState({ name: "", country: "", documentType: "Cedula", documentNumber: "", email: "", roomId: rooms[0]?.id || "", checkIn: new Date().toISOString().slice(0, 10), checkOut: "", exitTime: "11:00", paid: 0, total: rooms[0]?.rate || 0, method: "Efectivo" });
+function GuestModal({ rooms, onClose, onSubmit, quick = false }) {
+  const [values, setValues] = useState({ name: quick ? "Consumidor final" : "", country: "", documentType: "Cedula", documentNumber: "", email: "", roomId: rooms[0]?.id || "", checkIn: new Date().toISOString().slice(0, 10), checkOut: "", exitTime: "11:00", paid: 0, received: 0, total: rooms[0]?.rate || 0, method: "Efectivo" });
   const selectedRoom = rooms.find((room) => room.id === values.roomId);
   const nights = Math.max(1, Math.ceil((new Date(values.checkOut || values.checkIn) - new Date(values.checkIn)) / 86400000) || 1);
   const calculatedTotal = Number(selectedRoom?.rate || 0) * nights;
@@ -597,11 +630,39 @@ function GuestModal({ rooms, onClose, onSubmit }) {
   }
   return <Modal title="Nuevo ingreso / check-in" onClose={onClose}>
     {rooms.length === 0 && <div className="empty"><BedDouble /><span>No hay habitaciones disponibles. Libera o crea una habitacion primero.</span></div>}
-    <FormGrid values={values} setValues={setValues} fields={[["name", "Nombre del cliente"], ["country", "Nacionalidad"], ["documentType", "Tipo documento"], ["documentNumber", "Cedula / pasaporte"], ["email", "Correo para factura"], ["checkIn", "Fecha entrada", "date"], ["checkOut", "Fecha salida", "date"], ["exitTime", "Hora salida"], ["paid", "Valor pagado", "number"]]} customSetValues={update} />
+    <FormGrid values={values} setValues={setValues} fields={quick ? [["name", "Nombre del cliente"], ["email", "Correo para factura"], ["paid", "Valor pagado", "number"], ["received", "Efectivo recibido", "number"]] : [["name", "Nombre del cliente"], ["country", "Nacionalidad"], ["documentType", "Tipo documento"], ["documentNumber", "Cedula / pasaporte"], ["email", "Correo para factura"], ["checkIn", "Fecha entrada", "date"], ["checkOut", "Fecha salida", "date"], ["exitTime", "Hora salida"], ["paid", "Valor pagado", "number"], ["received", "Efectivo recibido", "number"]]} customSetValues={update} />
     <label>HABITACION DISPONIBLE<select value={values.roomId} onChange={(event) => update({ roomId: event.target.value })}>{rooms.map((room) => <option key={room.id} value={room.id}>Hab. {room.id} - {room.type} - {money(room.rate)}/noche</option>)}</select></label>
     <label>METODO DE PAGO<select value={values.method} onChange={(event) => setValues({ ...values, method: event.target.value })}><option>Efectivo</option><option>Transferencia</option><option>Tarjeta</option><option>Deposito</option></select></label>
-    <div className="quote-box"><span>Noches: <b>{nights}</b></span><span>Tarifa: <b>{money(selectedRoom?.rate)}</b></span><span>Total calculado: <b>{money(calculatedTotal)}</b></span></div>
+    <div className="quote-box"><span>Noches: <b>{nights}</b></span><span>Tarifa: <b>{money(selectedRoom?.rate)}</b></span><span>Total calculado: <b>{money(calculatedTotal)}</b></span><span>Cambio: <b>{money(Math.max(0, Number(values.received || 0) - Number(values.paid || 0)))}</b></span></div>
     <button className="primary" disabled={!rooms.length} onClick={() => onSubmit({ ...values, total: calculatedTotal })}><Save size={16} /> Registrar ingreso y emitir comprobante</button>
+  </Modal>;
+}
+
+function GuestEditModal({ guest, onClose, onSubmit }) {
+  const [values, setValues] = useState(guest);
+  return <Modal title="Editar cliente / huesped" onClose={onClose}>
+    <FormGrid values={values} setValues={setValues} fields={[["name", "Nombre"], ["country", "Nacionalidad"], ["documentType", "Documento"], ["documentNumber", "Cedula / pasaporte"], ["email", "Correo"], ["checkIn", "Entrada", "date"], ["checkOut", "Salida", "date"], ["exitTime", "Hora salida"], ["total", "Total", "number"], ["notes", "Notas"]]} />
+    <button className="primary" onClick={() => onSubmit(values)}><Save size={16} /> Guardar cambios</button>
+  </Modal>;
+}
+
+function PaymentModal({ guest, onClose, onSubmit }) {
+  const pending = Math.max(0, Number(guest.total || 0) - Number(guest.paid || 0));
+  const [values, setValues] = useState({ amount: pending, received: pending, method: "Efectivo", note: "Pago de hospedaje" });
+  const change = Math.max(0, Number(values.received || 0) - Number(values.amount || 0));
+  return <Modal title={`Registrar pago - ${guest.name}`} onClose={onClose}>
+    <div className="quote-box"><span>Total</span><b>{money(guest.total)}</b><span>Pagado</span><b>{money(guest.paid)}</b><span>Pendiente</span><b>{money(pending)}</b><span>Cambio</span><b>{money(change)}</b></div>
+    <label>METODO<select value={values.method} onChange={(event) => setValues({ ...values, method: event.target.value })}><option>Efectivo</option><option>Transferencia</option><option>Tarjeta</option><option>Deposito</option></select></label>
+    <FormGrid values={values} setValues={setValues} fields={[["amount", "Monto a pagar", "number"], ["received", "Recibido del cliente", "number"], ["note", "Nota"]]} />
+    <button className="primary" onClick={() => onSubmit(values)}><WalletCards size={16} /> Guardar pago y comprobante</button>
+  </Modal>;
+}
+
+function GuestDetailModal({ guest, onClose }) {
+  const payments = guest.payments || [];
+  return <Modal title={`Historial - ${guest.name}`} onClose={onClose}>
+    <div className="quote-box"><span>Habitacion</span><b>{guest.roomId || "-"}</b><span>Total</span><b>{money(guest.total)}</b><span>Pagado</span><b>{money(guest.paid)}</b><span>Pendiente</span><b>{money(Number(guest.total || 0) - Number(guest.paid || 0))}</b></div>
+    {payments.length === 0 ? <div className="empty"><Receipt /><span>Sin pagos registrados</span></div> : payments.map((payment) => <div className="movement" key={payment.id}><span className="income">+</span><div><b>{payment.note}</b><small>{new Date(payment.createdAt).toLocaleString("es-EC")} - {payment.method} - Recibido {money(payment.received)} - Cambio {money(payment.change)}</small></div><strong className="green">{money(payment.amount)}</strong></div>)}
   </Modal>;
 }
 
