@@ -88,6 +88,8 @@ function sessionValue() {
   try { return JSON.parse(localStorage.getItem("simot-session") || "null"); } catch { return null; }
 }
 
+let authFailureNotified = false;
+
 async function request(path, options = {}) {
   const session = sessionValue();
   const controller = new AbortController();
@@ -111,7 +113,13 @@ async function request(path, options = {}) {
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
-    if (response.status === 401 && session) localStorage.removeItem("simot-session");
+    if (response.status === 401 && session) {
+      localStorage.removeItem("simot-session");
+      if (!authFailureNotified) {
+        authFailureNotified = true;
+        window.dispatchEvent(new CustomEvent("simot:unauthorized", { detail: payload.error?.message }));
+      }
+    }
     throw new Error(payload.error?.message || `Error ${response.status}`);
   }
   return payload.data;
@@ -165,12 +173,22 @@ function App() {
     return () => clearInterval(timer);
   }, [session]);
 
+  useEffect(() => {
+    function handleUnauthorized() {
+      setData(emptyData);
+      setSession(null);
+      setToast({ message: "Tu sesion vencio. Ingresa nuevamente.", tone: "warning" });
+    }
+    window.addEventListener("simot:unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("simot:unauthorized", handleUnauthorized);
+  }, []);
+
   function notify(message, tone = "success") {
     setToast({ message, tone });
     setTimeout(() => setToast(null), 5000);
   }
 
-  if (!session) return <Login onLogin={(value) => { setSession(value); setView("dashboard"); }} />;
+  if (!session) return <Login onLogin={(value) => { authFailureNotified = false; setSession(value); setView("dashboard"); }} />;
   const modules = session.user.modules || [];
   const visibleNav = modules.includes("all") ? nav : nav.filter((item) => modules.includes(item.id));
   const active = visibleNav.some((item) => item.id === view) ? view : visibleNav[0]?.id || "dashboard";
@@ -336,10 +354,18 @@ function Rooms({ data, reload, notify }) {
   const rows = data.rooms.filter((room) => filter === "all" || room.status === filter);
   async function save(values) {
     const { _new, ...payload } = values;
-    await request(`/rooms/${values.id}`, { method: "PATCH", body: JSON.stringify(payload) }); notify("Habitacion actualizada"); setEditing(null); reload();
+    await request(_new ? "/rooms" : `/rooms/${values.id}`, {
+      method: _new ? "POST" : "PATCH",
+      body: JSON.stringify(payload)
+    });
+    notify(_new ? "Habitacion creada" : "Habitacion actualizada"); setEditing(null); reload();
   }
-  return <><div className="toolbar"><StatusFilters values={["all", "available", "occupied", "cleaning", "maintenance", "out_of_service"]} active={filter} onChange={setFilter} /><div className="counter">{data.rooms.length} habitaciones configuradas</div></div>
+  function createRoom() {
+    setEditing({ _new: true, id: "", floor: 1, type: "Habitacion Privada", capacity: 2, rate: 0, status: "available", notes: "", amenities: [] });
+  }
+  return <><div className="toolbar"><StatusFilters values={["all", "available", "occupied", "cleaning", "maintenance", "out_of_service"]} active={filter} onChange={setFilter} /><div className="counter">{data.rooms.length} habitaciones configuradas</div><button className="primary" onClick={createRoom}><Plus size={17} /> Nueva habitacion</button></div>
     {[...new Set(rows.map((room) => room.floor))].sort((a, b) => a - b).map((floor) => <section className="floor" key={floor}><div className="section-title"><span>Piso {floor}</span><small>{rows.filter((room) => room.floor === floor).length} habitaciones</small></div><div className="room-grid">{rows.filter((room) => room.floor === floor).map((room) => <RoomCard key={room.id} room={room} reservation={data.reservations.find((item) => item.roomId === room.id && item.status === "checked_in")} onEdit={() => setEditing(room)} />)}</div></section>)}
+    {!rows.length && <Empty icon={BedDouble} text={data.rooms.length ? "No hay habitaciones con este filtro" : "No hay habitaciones configuradas"} />}
     {editing && <RoomModal room={editing} onClose={() => setEditing(null)} onSubmit={save} />}
   </>;
 }
