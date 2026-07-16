@@ -21,6 +21,7 @@ import {
   Mail,
   Pencil,
   Plus,
+  Printer,
   Receipt,
   RefreshCw,
   Save,
@@ -506,7 +507,36 @@ function GuestHistoryModal({ guest, stays, payments, onClose }) {
   </Modal>;
 }
 
-function InvoiceModal({ invoice, payments, onClose }) { return <Modal title={`Factura ${invoice.number}`} onClose={onClose} size="large"><div className="invoice-heading"><div><small>CLIENTE</small><b>{invoice.guest?.name}</b><span>{invoice.guest?.documentType} {invoice.guest?.documentNumber || "Consumidor final"}</span><span>{invoice.guest?.email}</span></div><div><small>EMISION</small><b>{dateText(invoice.issuedAt, true)}</b><span>Reserva {invoice.reservationCode}</span><span>Habitacion {invoice.roomId}</span></div></div><LineItems lines={invoice.lines || []} /><div className="totals"><span>Subtotal <b>{money(invoice.subtotal)}</b></span><span>Impuestos <b>{money(invoice.tax)}</b></span><span className="grand">Total <b>{money(invoice.total)}</b></span><span>Pagado <b>{money(invoice.paid)}</b></span><span>Saldo <b>{money(invoice.balance)}</b></span></div><h4>Pagos aplicados</h4><PaymentList items={payments} /></Modal>; }
+function InvoiceModal({ invoice, payments, onClose }) {
+  return <Modal title="Comprobante de hospedaje" onClose={onClose} size="large">
+    <div className="invoice-toolbar"><span>Documento definitivo generado al completar el checkout.</span><button className="secondary" onClick={() => window.print()}><Printer size={16} /> Imprimir / guardar PDF</button></div>
+    <article className="invoice-document">
+      <header className="invoice-brand">
+        <div className="invoice-logo">WI</div>
+        <div><strong>Wild Incas</strong><span>Backpackers Hostal</span><small>Cuenca, Ecuador</small></div>
+        <div className="invoice-identity"><small>COMPROBANTE DE HOSPEDAJE</small><b>{invoice.number}</b><Status status={invoice.paymentStatus} /></div>
+      </header>
+      <section className="invoice-meta">
+        <div><small>Fecha de emision</small><b>{dateText(invoice.issuedAt, true)}</b></div>
+        <div><small>Reserva</small><b>{invoice.reservationCode || "-"}</b></div>
+        <div><small>Habitacion</small><b>Hab. {invoice.roomId}</b></div>
+        <div><small>Estadia</small><b>{dateText(invoice.checkIn)} al {dateText(invoice.checkOut)}</b></div>
+      </section>
+      <section className="invoice-customer">
+        <div><small>Huesped / cliente</small><b>{invoice.guest?.name || "Consumidor final"}</b><span>{invoice.guest?.documentType || "Documento"}: {invoice.guest?.documentNumber || "No registrado"}</span></div>
+        <div><small>Contacto</small><b>{invoice.guest?.email || "Correo no registrado"}</b><span>{invoice.guest?.phone || "Telefono no registrado"}</span><span>{invoice.guest?.address || "Direccion no registrada"}</span></div>
+      </section>
+      <div className="invoice-detail-title"><span>Detalle facturado</span><small>Valores expresados en USD</small></div>
+      <LineItems lines={invoice.lines || []} />
+      <section className="invoice-closing">
+        <div className="invoice-notes"><small>Observaciones</small><p>{invoice.notes || "Servicio de hospedaje registrado por Wild Incas."}</p><span>Documento interno de control. No sustituye un comprobante tributario autorizado por el SRI.</span></div>
+        <div className="totals"><span>Subtotal <b>{money(invoice.subtotal)}</b></span><span>Impuestos <b>{money(invoice.tax)}</b></span><span className="grand">Total <b>{money(invoice.total)}</b></span><span>Pagado <b>{money(invoice.paid)}</b></span><span className={invoice.balance > 0 ? "balance due" : "balance"}>Saldo <b>{money(invoice.balance)}</b></span></div>
+      </section>
+      <section className="invoice-payments"><h4>Pagos registrados</h4><PaymentList items={payments} /></section>
+      <footer><span>Gracias por hospedarte en Wild Incas.</span><small>Generado por SIMOT · {invoice.number} · {dateText(invoice.issuedAt, true)}</small></footer>
+    </article>
+  </Modal>;
+}
 
 function RoomModal({ room, onClose, onSubmit }) { const [values, setValues] = useState(room); return <Modal title={room._new ? "Nueva habitacion" : `Editar habitacion ${room.id}`} onClose={onClose}><div className="form-grid"><Field label="Numero" value={values.id} disabled={!values._new} onChange={(id) => setValues({ ...values, id })} /><Field label="Piso" type="number" value={values.floor} onChange={(floor) => setValues({ ...values, floor })} /><Field label="Tipo" value={values.type} onChange={(type) => setValues({ ...values, type })} /><Field label="Capacidad" type="number" min="1" value={values.capacity} onChange={(capacity) => setValues({ ...values, capacity })} /><Field label="Tarifa por noche" type="number" value={values.rate} onChange={(rate) => setValues({ ...values, rate })} /><Field label="Estado" type="select" options={[{ value: "available", label: "Disponible" }, { value: "occupied", label: "Ocupada" }, { value: "cleaning", label: "En limpieza" }, { value: "maintenance", label: "Mantenimiento" }, { value: "out_of_service", label: "Fuera de servicio" }]} value={values.status} onChange={(status) => setValues({ ...values, status })} /></div><Field label="Notas operativas" type="textarea" value={values.notes} onChange={(notes) => setValues({ ...values, notes })} /><button className="primary full" onClick={() => onSubmit(values)}><Save size={16} /> Guardar habitacion</button></Modal>; }
 
