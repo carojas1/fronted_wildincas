@@ -72,6 +72,7 @@ const labels = {
   queued: "En cola",
   sending: "Enviando",
   pending_retry: "Reintento pendiente",
+  configuration_error: "Configuracion pendiente",
   failed: "Fallido",
   active: "Activo",
   inactive: "Inactivo",
@@ -82,6 +83,20 @@ const emptyData = {
   rooms: [], reservations: [], guests: [], movements: [], incidents: [], checklist: [], employees: [],
   invoices: [], payments: [], notifications: [], dashboard: {}, summary: {}, metrics: {}, daily: {}, shifts: {},
   users: [], roles: [], currentShift: null, emailConfig: {}
+};
+
+const viewSources = {
+  dashboard: [["rooms", "/rooms", []], ["dashboard", "/reservations/dashboard", {}], ["metrics", "/finance/metrics", {}], ["movements", "/finance/movements", []]],
+  reservations: [["rooms", "/rooms", []], ["reservations", "/reservations/reservations", []], ["guests", "/reservations/guests", []], ["payments", "/finance/payments", []]],
+  guests: [["guests", "/reservations/guests", []], ["reservations", "/reservations/reservations", []], ["payments", "/finance/payments", []], ["invoices", "/finance/invoices", []]],
+  rooms: [["rooms", "/rooms", []]],
+  cleaning: [["rooms", "/rooms", []], ["incidents", "/operations/incidents", []]],
+  logbook: [["incidents", "/operations/incidents", []], ["rooms", "/rooms", []]],
+  billing: [["invoices", "/finance/invoices", []], ["payments", "/finance/payments", []], ["reservations", "/reservations/reservations", []], ["notifications", "/notifications/events", []], ["emailConfig", "/notifications/config", {}]],
+  cash: [["daily", "/finance/daily", {}], ["shifts", "/finance/shifts", {}], ["checklist", "/operations/checklist", []]],
+  income: [["summary", "/finance/summary", {}], ["movements", "/finance/movements", []]],
+  employees: [["employees", "/employees", []], ["currentShift", "/employees/current-shift", null], ["roles", "/auth/roles", []]],
+  users: [["users", "/auth/users", []], ["roles", "/auth/roles", []], ["emailConfig", "/notifications/config", {}]]
 };
 
 function sessionValue() {
@@ -146,32 +161,23 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
 
-  async function loadAll() {
+  async function loadView(target = view) {
     setLoading(true);
-    const results = await Promise.all([
-      safeRequest("/rooms", []), safeRequest("/reservations/reservations", []), safeRequest("/reservations/guests", []),
-      safeRequest("/reservations/dashboard", {}), safeRequest("/finance/movements", []), safeRequest("/finance/invoices", []),
-      safeRequest("/finance/payments", []), safeRequest("/finance/summary", {}), safeRequest("/finance/metrics", {}),
-      safeRequest("/finance/daily", {}), safeRequest("/finance/shifts", {}), safeRequest("/operations/incidents", []),
-      safeRequest("/operations/checklist", []), safeRequest("/employees", []), safeRequest("/employees/current-shift", null),
-      safeRequest("/notifications/events", []), safeRequest("/notifications/config", {}), safeRequest("/auth/users", []),
-      safeRequest("/auth/roles", [])
-    ]);
-    setData({
-      rooms: results[0], reservations: results[1], guests: results[2], dashboard: results[3], movements: results[4],
-      invoices: results[5], payments: results[6], summary: results[7], metrics: results[8], daily: results[9],
-      shifts: results[10], incidents: results[11], checklist: results[12], employees: results[13], currentShift: results[14],
-      notifications: results[15], emailConfig: results[16], users: results[17], roles: results[18]
-    });
-    setLoading(false);
+    const sources = viewSources[target] || viewSources.dashboard;
+    try {
+      const values = await Promise.all(sources.map(([, path, fallback]) => safeRequest(path, fallback)));
+      setData((current) => ({ ...current, ...Object.fromEntries(sources.map(([key], index) => [key, values[index]])) }));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     if (!session) return undefined;
-    loadAll();
-    const timer = setInterval(loadAll, 30000);
+    loadView(view);
+    const timer = setInterval(() => loadView(view), 60000);
     return () => clearInterval(timer);
-  }, [session]);
+  }, [session, view]);
 
   useEffect(() => {
     function handleUnauthorized() {
@@ -193,7 +199,8 @@ function App() {
   const visibleNav = modules.includes("all") ? nav : nav.filter((item) => modules.includes(item.id));
   const active = visibleNav.some((item) => item.id === view) ? view : visibleNav[0]?.id || "dashboard";
   const title = nav.find((item) => item.id === active)?.label || "Dashboard";
-  const common = { data, reload: loadAll, notify, session };
+  const reload = () => loadView(active);
+  const common = { data, reload, notify, session };
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -206,7 +213,7 @@ function App() {
       <div className="profile"><Avatar name={session.user.name} /><span><b>{session.user.name}</b><small>{session.user.role}</small></span><button title="Cerrar sesion" onClick={() => { localStorage.removeItem("simot-session"); setSession(null); }}><LogOut size={17} /></button></div>
     </aside>
     <main>
-      <header className="page-header"><div><p>{nav.find((item) => item.id === active)?.group}</p><h1>{title}</h1></div><button className="secondary" onClick={loadAll} disabled={loading}><RefreshCw size={16} className={loading ? "spin" : ""} /> Actualizar</button></header>
+      <header className="page-header"><div><p>{nav.find((item) => item.id === active)?.group}</p><h1>{title}</h1></div><button className="secondary" onClick={reload} disabled={loading}><RefreshCw size={16} className={loading ? "spin" : ""} /> Actualizar</button></header>
       {active === "dashboard" && <Dashboard {...common} setView={setView} />}
       {active === "reservations" && <Reservations {...common} />}
       {active === "guests" && <Guests {...common} />}
@@ -230,7 +237,7 @@ function Login({ onLogin }) {
   async function submit(event) {
     event.preventDefault(); setBusy(true); setError("");
     try {
-      const result = await request("/auth/login", { method: "POST", body: JSON.stringify(values) });
+      const result = await request("/auth/login", { method: "POST", body: JSON.stringify(values), timeout: 70000 });
       localStorage.setItem("simot-session", JSON.stringify(result)); onLogin(result);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
@@ -394,9 +401,9 @@ function Billing({ data, reload, notify }) {
     await request(`/reservations/reservations/${reservation.id}/payments`, { method: "POST", body: JSON.stringify({ ...values, idempotencyKey: `invoice-payment:${item.id}:${Date.now()}` }) });
     notify("Pago aplicado a la factura"); setPayment(null); reload();
   }
-  async function retry(job) { await request(`/notifications/events/${job.id}/retry`, { method: "POST", body: "{}" }); notify("Reintento de correo procesado"); reload(); }
+    async function retry(job) { await request(`/notifications/events/${job.id}/retry`, { method: "POST", body: "{}" }); notify("Correo agregado a la cola de reintento"); reload(); }
   return <div className="billing-layout"><section className="panel span-2"><PanelHeader title="Facturas definitivas" /><div className="data-table invoice-table"><div className="table-row table-head"><span>FACTURA</span><span>CLIENTE</span><span>ESTADIA</span><span>TOTAL</span><span>SALDO</span><span>ESTADO / ACCIONES</span></div>{data.invoices.map((item) => <div className="table-row" key={item.id}><span><b>{item.number}</b><small>{dateText(item.issuedAt, true)}</small><small>{item.reservationCode}</small></span><span><b>{item.guest?.name}</b><small>{item.guest?.documentNumber || "Consumidor final"}</small></span><span><b>Hab. {item.roomId}</b><small>{dateText(item.checkIn)} - {dateText(item.checkOut)}</small></span><span><b>{money(item.total)}</b><small>{money(item.paid)} pagado</small></span><span><b>{money(item.balance)}</b></span><span className="invoice-actions"><Status status={item.paymentStatus} /><IconButton title="Ver factura" onClick={() => setInvoice(item)}><Eye size={16} /></IconButton>{item.balance > 0 && <IconButton title="Registrar pago" onClick={() => setPayment(item)}><CreditCard size={16} /></IconButton>}</span></div>)}{!data.invoices.length && <Empty icon={Receipt} text="Las facturas definitivas aparecen al completar el checkout" />}</div></section>
-    <section className="panel"><PanelHeader title="Entrega de correos" /><div className="mail-summary"><span><b>{data.emailConfig.queue?.sent || 0}</b><small>Enviados</small></span><span><b>{data.emailConfig.queue?.pending || 0}</b><small>Pendientes</small></span><span><b>{data.emailConfig.queue?.failed || 0}</b><small>Fallidos</small></span></div>{data.notifications.slice(0, 8).map((job) => <div className="mail-row" key={job.id}><span className={`mail-dot ${job.status}`} /><div><b>{labels[job.eventType] || eventLabel(job.eventType)}</b><small>{job.to}</small><small>{dateText(job.createdAt, true)} - intento {job.attempts}</small>{job.error && <em>{job.error}</em>}</div><Status status={job.status} />{["failed", "pending_retry"].includes(job.status) && <IconButton title="Reintentar" onClick={() => retry(job)}><RefreshCw size={15} /></IconButton>}</div>)}</section>
+    <section className="panel"><PanelHeader title="Entrega de correos" /><div className="mail-summary"><span><b>{data.emailConfig.queue?.sent || 0}</b><small>Enviados</small></span><span><b>{data.emailConfig.queue?.pending || 0}</b><small>Pendientes</small></span><span><b>{data.emailConfig.queue?.failed || 0}</b><small>Fallidos</small></span></div>{data.notifications.slice(0, 8).map((job) => <div className="mail-row" key={job.id}><span className={`mail-dot ${job.status}`} /><div><b>{labels[job.eventType] || eventLabel(job.eventType)}</b><small>{job.to}</small><small>{dateText(job.createdAt, true)} - intento {job.attempts}</small>{job.error && <em>{job.error}</em>}</div><Status status={job.status} />{["failed", "pending_retry", "configuration_error"].includes(job.status) && <IconButton title="Reintentar" onClick={() => retry(job)}><RefreshCw size={15} /></IconButton>}</div>)}</section>
     {invoice && <InvoiceModal invoice={invoice} payments={data.payments.filter((item) => item.invoiceId === invoice.id || item.reservationId === invoice.reservationId)} onClose={() => setInvoice(null)} />}
     {payment && <PaymentModal reservation={{ ...data.reservations.find((row) => row.id === payment.reservationId), total: payment.total }} payments={data.payments} onClose={() => setPayment(null)} onSubmit={(values) => pay(payment, values)} />}
   </div>;
