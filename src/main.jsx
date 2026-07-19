@@ -80,6 +80,9 @@ const labels = {
   failed: "Fallido",
   active: "Activo",
   inactive: "Inactivo",
+  overdue: "Salida vencida",
+  overpaid: "Sobrepago",
+  voided: "Anulado",
   all: "Todos"
 };
 
@@ -98,8 +101,8 @@ const viewSources = {
   logbook: [["incidents", "/operations/incidents", []], ["rooms", "/rooms", []]],
   billing: [["invoices", "/finance/invoices", []], ["payments", "/finance/payments", []], ["reservations", "/reservations/reservations", []], ["notifications", "/notifications/events", []], ["emailConfig", "/notifications/config", {}]],
   cash: [["daily", "/finance/daily", {}], ["shifts", "/finance/shifts", {}], ["checklist", "/operations/checklist", []]],
-  income: [["summary", "/finance/summary", {}], ["movements", "/finance/movements", []]],
-  employees: [["employees", "/employees", []], ["currentShift", "/employees/current-shift", null], ["roles", "/auth/roles", []]],
+  income: [["summary", "/finance/summary", {}], ["movements", "/finance/movements", []], ["payments", "/finance/payments", []]],
+  employees: [["employees", "/employees", []], ["currentShift", "/employees/current-shift", null], ["roles", "/auth/roles", []], ["users", "/auth/users", []]],
   users: [["users", "/auth/users", []], ["roles", "/auth/roles", []], ["emailConfig", "/notifications/config", {}]]
 };
 
@@ -146,6 +149,15 @@ async function request(path, options = {}) {
 
 async function safeRequest(path, fallback) {
   try { return await request(path); } catch (error) { console.warn(path, error.message); return fallback; }
+}
+
+async function attempt(notify, action) {
+  try {
+    return { ok: true, value: await action() };
+  } catch (error) {
+    notify(error.message || "No se pudo completar la operacion", "warning");
+    return { ok: false, value: null };
+  }
 }
 
 function money(value) {
@@ -268,6 +280,7 @@ function Login({ onLogin }) {
 function Dashboard({ data, setView }) {
   const occupied = data.dashboard.occupiedRoomIds?.length || 0;
   const occupancy = data.rooms.length ? Math.round((occupied / data.rooms.length) * 100) : 0;
+  const recentMovements = data.movements.filter((item) => item.status !== "voided").slice(0, 8);
   const cards = [
     ["Ocupacion actual", `${occupancy}%`, `${occupied} de ${data.rooms.length} habitaciones`, BedDouble],
     ["Cobros confirmados", money(data.metrics.collected), "Pagos efectivos registrados", TrendingUp],
@@ -282,7 +295,7 @@ function Dashboard({ data, setView }) {
         <AgendaBlock title="Llegadas" items={data.dashboard.arrivals} empty="Sin llegadas programadas" />
         <AgendaBlock title="Salidas" items={data.dashboard.departures} empty="Sin salidas pendientes" />
       </article>
-      <article className="panel span-2"><PanelHeader title="Actividad financiera reciente" action="Abrir contabilidad" onClick={() => setView("income")} /><MovementList items={data.movements.slice(0, 8)} /></article>
+      <article className="panel span-2"><PanelHeader title="Actividad financiera reciente" action="Abrir contabilidad" onClick={() => setView("income")} /><MovementList items={recentMovements} /></article>
     </section>
   </div>;
 }
@@ -291,20 +304,28 @@ function Reservations({ data, reload, notify, session }) {
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState(null);
-  const rows = data.reservations.filter((item) => (filter === "all" || item.status === filter) && [item.code, item.guest?.name, item.guest?.documentNumber, item.roomId].some((value) => String(value || "").toLowerCase().includes(query.toLowerCase())));
+  const overdueCount = data.reservations.filter(isOverdueStay).length;
+  const rows = data.reservations.filter((item) => {
+    const statusMatches = filter === "all" || (filter === "overdue" ? isOverdueStay(item) : item.status === filter);
+    const queryMatches = [item.code, item.guest?.name, item.guest?.documentNumber, item.roomId]
+      .some((value) => String(value || "").toLowerCase().includes(query.toLowerCase()));
+    return statusMatches && queryMatches;
+  });
   async function create(values) {
     const result = await request("/reservations/reservations", { method: "POST", body: JSON.stringify({ ...values, actor: session.user.name }) });
     notify(result.notification?.status === "sent" ? "Reserva guardada y correo enviado" : "Reserva guardada; correo en cola de reintento", result.notification?.status === "sent" ? "success" : "warning");
     setModal(null); reload();
   }
   async function checkIn(item) {
-    await request(`/reservations/reservations/${item.id}/check-in`, { method: "POST", body: JSON.stringify({ actor: session.user.name }) });
+    const result = await attempt(notify, () => request(`/reservations/reservations/${item.id}/check-in`, { method: "POST", body: JSON.stringify({ actor: session.user.name }) }));
+    if (!result.ok) return;
     notify(`Check-in registrado en la habitacion ${item.roomId}`); reload();
   }
   async function cancel(item) {
     const reason = window.prompt("Motivo de cancelacion", "Solicitud del cliente");
     if (reason === null) return;
-    await request(`/reservations/reservations/${item.id}/cancel`, { method: "POST", body: JSON.stringify({ reason, actor: session.user.name }) });
+    const result = await attempt(notify, () => request(`/reservations/reservations/${item.id}/cancel`, { method: "POST", body: JSON.stringify({ reason, actor: session.user.name }) }));
+    if (!result.ok) return;
     notify("Reserva cancelada"); reload();
   }
   async function addCharge(item, values) {
@@ -317,17 +338,21 @@ function Reservations({ data, reload, notify, session }) {
   }
   async function checkout(item) {
     if (!window.confirm(`Finalizar estadia ${item.code} y emitir factura definitiva?`)) return;
-    const result = await request(`/reservations/reservations/${item.id}/checkout`, { method: "POST", body: JSON.stringify({ actor: session.user.name }) });
-    notify(`Checkout completado. Factura ${result.invoice.number} por ${money(result.invoice.total)}`); reload();
+    const result = await attempt(notify, () => request(`/reservations/reservations/${item.id}/checkout`, { method: "POST", body: JSON.stringify({ actor: session.user.name }) }));
+    if (!result.ok) return;
+    notify(`Checkout completado. Factura ${result.value.invoice.number} por ${money(result.value.invoice.total)}`); reload();
   }
   async function update(item, values) {
     await request(`/reservations/reservations/${item.id}`, { method: "PATCH", body: JSON.stringify({ ...values, actor: session.user.name }) });
     notify("Reserva actualizada"); setModal(null); reload();
   }
   return <>
-    <div className="toolbar"><div className="search"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Reserva, huesped, documento o habitacion" /></div><StatusFilters values={["all", "confirmed", "checked_in", "checked_out", "cancelled"]} active={filter} onChange={setFilter} /><button className="primary" onClick={() => setModal({ type: "create" })}><Plus size={17} /> Nueva estadia</button></div>
+    <div className="toolbar"><div className="search"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Reserva, huesped, documento o habitacion" /></div><StatusFilters values={["all", "overdue", "confirmed", "checked_in", "checked_out", "cancelled"]} active={filter} onChange={setFilter} />{overdueCount > 0 && <div className="counter attention"><AlertTriangle size={15} /> {overdueCount} salida(s) por cerrar</div>}<button className="primary" onClick={() => setModal({ type: "create" })}><Plus size={17} /> Nueva estadia</button></div>
     <div className="data-table reservation-table"><div className="table-row table-head"><span>RESERVA / HUESPED</span><span>HABITACION</span><span>ESTADIA</span><span>TOTAL</span><span>ESTADO</span><span>ACCIONES</span></div>
-      {rows.map((item) => <div className="table-row" key={item.id}><span><b>{item.code}</b><small>{item.guest?.name}</small><small>{item.guest?.documentNumber || "Consumidor final"}</small></span><span><b>Hab. {item.roomId}</b><small>{item.roomType}</small><small>{money(item.nightlyRate)}/noche</small></span><span><b>{dateText(item.checkIn)} - {dateText(item.checkOut)}</b><small>{item.nights} noche(s), {item.adults} adulto(s)</small><small>{item.charges?.length || 0} consumo(s)</small></span><span><b>{money(item.total)}</b><small>{money(paymentTotal(data.payments, item.id))} pagado</small><small>{money(Math.max(0, item.total - paymentTotal(data.payments, item.id)))} pendiente</small></span><span><Status status={item.status} /></span><span className="row-actions">
+      {rows.map((item) => {
+        const account = paymentSummary(data.payments, item.id, item.total);
+        const overdue = isOverdueStay(item);
+        return <div className={`table-row ${overdue ? "overdue-row" : ""}`} key={item.id}><span><b>{item.code}</b><small>{item.guest?.name}</small><small>{item.guest?.documentNumber || "Consumidor final"}</small></span><span><b>Hab. {item.roomId}</b><small>{item.roomType}</small><small>{money(item.nightlyRate)}/noche</small></span><span><b>{dateText(item.checkIn)} - {dateText(item.checkOut)}</b><small>{item.nights} noche(s), {item.adults} adulto(s)</small><small>{item.charges?.length || 0} consumo(s)</small>{overdue && <small className="negative">Salida pendiente desde {dateText(item.checkOut)}</small>}</span><span><b>{money(item.total)}</b><small>{money(account.paid)} pagado</small><small>{money(account.balance)} pendiente</small>{account.overpaid > 0 && <small className="negative">Sobrepago: {money(account.overpaid)}</small>}</span><span><Status status={overdue ? "overdue" : item.status} /></span><span className="row-actions">
         <IconButton title="Ver detalle" onClick={() => setModal({ type: "detail", item })}><Eye size={16} /></IconButton>
         {["confirmed", "checked_in"].includes(item.status) && <IconButton title="Editar o ampliar estadia" onClick={() => setModal({ type: "edit", item })}><Pencil size={16} /></IconButton>}
         {item.status === "confirmed" && <IconButton title="Check-in" onClick={() => checkIn(item)}><LogIn size={16} /></IconButton>}
@@ -335,7 +360,8 @@ function Reservations({ data, reload, notify, session }) {
         {["confirmed", "checked_in", "checked_out"].includes(item.status) && paymentTotal(data.payments, item.id) < item.total && <IconButton title="Registrar pago" onClick={() => setModal({ type: "payment", item })}><CreditCard size={16} /></IconButton>}
         {item.status === "checked_in" && <IconButton title="Checkout" onClick={() => checkout(item)}><LogOut size={16} /></IconButton>}
         {item.status === "confirmed" && <IconButton title="Cancelar" danger onClick={() => cancel(item)}><X size={16} /></IconButton>}
-      </span></div>)}
+      </span></div>;
+      })}
       {!rows.length && <Empty icon={BookOpenCheck} text="No hay reservas con estos filtros" />}
     </div>
     {modal?.type === "create" && <ReservationModal rooms={data.rooms} reservations={data.reservations} onClose={() => setModal(null)} onSubmit={create} />}
@@ -352,7 +378,8 @@ function Guests({ data, reload, notify }) {
   const [history, setHistory] = useState(null);
   const rows = data.guests.filter((item) => [item.name, item.documentNumber, item.email, item.phone].some((value) => String(value || "").toLowerCase().includes(query.toLowerCase())));
   async function update(values) {
-    await request(`/reservations/guests/${values.id}`, { method: "PATCH", body: JSON.stringify(values) });
+    const result = await attempt(notify, () => request(`/reservations/guests/${values.id}`, { method: "PATCH", body: JSON.stringify(values) }));
+    if (!result.ok) return;
     notify("Datos del huesped actualizados"); setEditing(null); reload();
   }
   return <><div className="toolbar"><div className="search"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nombre, cedula, correo o telefono" /></div><div className="counter">{rows.length} huespedes</div></div>
@@ -375,10 +402,11 @@ function Rooms({ data, reload, notify }) {
   const rows = data.rooms.filter((room) => filter === "all" || room.status === filter);
   async function save(values) {
     const { _new, ...payload } = values;
-    await request(_new ? "/rooms" : `/rooms/${values.id}`, {
+    const result = await attempt(notify, () => request(_new ? "/rooms" : `/rooms/${values.id}`, {
       method: _new ? "POST" : "PATCH",
       body: JSON.stringify(payload)
-    });
+    }));
+    if (!result.ok) return;
     notify(_new ? "Habitacion creada" : "Habitacion actualizada"); setEditing(null); reload();
   }
   function createRoom() {
@@ -394,16 +422,16 @@ function Rooms({ data, reload, notify }) {
 function Cleaning({ data, reload, notify }) {
   const [creating, setCreating] = useState(false);
   const rooms = data.rooms.filter((item) => item.status === "cleaning");
-  async function complete(room) { await request(`/rooms/${room.id}/status`, { method: "PATCH", body: JSON.stringify({ status: "available" }) }); notify(`Habitacion ${room.id} limpia y disponible`); reload(); }
-  async function create(values) { await request(`/rooms/${values.roomId}/cleaning`, { method: "POST", body: JSON.stringify({ notes: values.notes }) }); notify("Tarea de limpieza creada"); setCreating(false); reload(); }
+  async function complete(room) { const result = await attempt(notify, () => request(`/rooms/${room.id}/status`, { method: "PATCH", body: JSON.stringify({ status: "available" }) })); if (!result.ok) return; notify(`Habitacion ${room.id} limpia y disponible`); reload(); }
+  async function create(values) { const result = await attempt(notify, () => request(`/rooms/${values.roomId}/cleaning`, { method: "POST", body: JSON.stringify({ notes: values.notes }) })); if (!result.ok) return; notify("Tarea de limpieza creada"); setCreating(false); reload(); }
   return <><div className="toolbar"><div className="counter">{rooms.length} tareas pendientes</div><button className="primary" onClick={() => setCreating(true)}><Plus size={17} /> Nueva tarea</button></div><div className="cleaning-layout"><section className="panel"><PanelHeader title="Limpieza de habitaciones" />{rooms.length ? rooms.map((room) => <article className="work-item" key={room.id}><span className="work-icon"><Sparkles size={18} /></span><div><b>Habitacion {room.id}</b><p>{room.housekeepingNotes || room.notes || "Limpieza completa pendiente"}</p><small>{room.type} - Piso {room.floor} - ultima limpieza {room.lastCleaned || "sin registro"}</small></div><button className="primary compact" onClick={() => complete(room)}><Check size={16} /> Completar</button></article>) : <Empty icon={Sparkles} text="No hay habitaciones pendientes de limpieza" />}</section><section className="panel"><PanelHeader title="Mantenimiento abierto" />{data.incidents.filter((item) => item.category === "mantenimiento" && item.status === "open").map((item) => <WorkIncident key={item.id} item={item} />)}</section></div>{creating && <CleaningModal rooms={data.rooms} onClose={() => setCreating(false)} onSubmit={create} />}</>;
 }
 
 function Logbook({ data, reload, notify, session }) {
   const [filter, setFilter] = useState("open"); const [creating, setCreating] = useState(false);
   const rows = data.incidents.filter((item) => filter === "all" || item.status === filter);
-  async function create(values) { await request("/operations/incidents", { method: "POST", body: JSON.stringify({ ...values, createdBy: session.user.name }) }); notify("Novedad registrada"); setCreating(false); reload(); }
-  async function resolve(item) { const resolution = window.prompt("Resolucion aplicada", "Trabajo completado y verificado"); if (resolution === null) return; await request(`/operations/incidents/${item.id}/resolve`, { method: "PATCH", body: JSON.stringify({ resolution, resolvedBy: session.user.name }) }); notify("Novedad resuelta"); reload(); }
+  async function create(values) { const result = await attempt(notify, () => request("/operations/incidents", { method: "POST", body: JSON.stringify({ ...values, createdBy: session.user.name }) })); if (!result.ok) return; notify("Novedad registrada"); setCreating(false); reload(); }
+  async function resolve(item) { const resolution = window.prompt("Resolucion aplicada", "Trabajo completado y verificado"); if (resolution === null) return; const result = await attempt(notify, () => request(`/operations/incidents/${item.id}/resolve`, { method: "PATCH", body: JSON.stringify({ resolution, resolvedBy: session.user.name }) })); if (!result.ok) return; notify("Novedad resuelta"); reload(); }
   return <><div className="toolbar"><StatusFilters values={["open", "resolved", "all"]} active={filter} onChange={setFilter} /><button className="primary" onClick={() => setCreating(true)}><Plus size={17} /> Nueva novedad</button></div><section className="panel incident-list">{rows.map((item) => <article className="incident" key={item.id}><span className={`priority ${item.priority}`} /><div><header><b>{item.title}</b><Status status={item.status} /></header><p>{item.description}</p><small>{dateText(item.createdAt, true)} - {item.createdBy}{item.roomId ? ` - Hab. ${item.roomId}` : ""}</small>{item.actionRequired && <em>Accion requerida: {item.actionRequired}</em>}{item.resolution && <em>Resolucion: {item.resolution}</em>}</div>{item.status === "open" && <button className="primary compact" onClick={() => resolve(item)}><Check size={16} /> Completar</button>}</article>)}{!rows.length && <Empty icon={ClipboardList} text="No hay novedades con este estado" />}</section>{creating && <IncidentModal rooms={data.rooms} onClose={() => setCreating(false)} onSubmit={create} />}</>;
 }
 
@@ -426,7 +454,7 @@ function Billing({ data, reload, notify }) {
     await request(`/reservations/reservations/${reservation.id}/payments`, { method: "POST", body: JSON.stringify(values) });
     notify("Pago aplicado a la factura"); setPayment(null); reload();
   }
-  async function retry(job) { await request(`/notifications/events/${job.id}/retry`, { method: "POST", body: "{}" }); notify("Correo agregado a la cola de reintento"); reload(); }
+  async function retry(job) { const result = await attempt(notify, () => request(`/notifications/events/${job.id}/retry`, { method: "POST", body: "{}" })); if (!result.ok) return; notify("Correo agregado a la cola de reintento"); reload(); }
   async function sendInvoice(item) {
     if (!item.guest?.email) throw new Error("Registra el correo del cliente antes de enviar la factura");
     const reservation = data.reservations.find((row) => row.id === item.reservationId) || { code: item.reservationCode, roomId: item.roomId, checkIn: item.checkIn, checkOut: item.checkOut };
@@ -436,13 +464,14 @@ function Billing({ data, reload, notify }) {
   async function voidPayment(item) {
     const reason = window.prompt("Motivo de anulacion del pago", "Registro duplicado o correccion autorizada");
     if (reason === null) return;
-    await request(`/finance/payments/${item.id}/void`, { method: "POST", body: JSON.stringify({ reason }) });
+    const result = await attempt(notify, () => request(`/finance/payments/${item.id}/void`, { method: "POST", body: JSON.stringify({ reason }) }));
+    if (!result.ok) return;
     notify("Pago anulado con trazabilidad contable", "warning"); setInvoice(null); reload();
   }
   const invoicePayments = invoice ? data.payments.filter((item) => item.invoiceId === invoice.id || item.reservationId === invoice.reservationId) : [];
   const invoiceDelivery = invoice ? data.notifications.find((job) => job.payload?.invoice?.id === invoice.id) : null;
   return <div className="billing-layout">
-    <section className="kpi-grid billing-kpis span-2"><MiniKpi title="Facturado" value={money(totals.billed)} detail={`${data.invoices.length} comprobantes definitivos`} /><MiniKpi title="Cobrado" value={money(totals.paid)} detail="Pagos confirmados" /><MiniKpi title="Por cobrar" value={money(totals.balance)} detail="Saldos pendientes" /><MiniKpi title="Correos entregados" value={data.emailConfig.queue?.sent || 0} detail={`${data.emailConfig.queue?.pending || 0} en proceso`} /></section>
+    <section className="kpi-grid billing-kpis span-2"><MiniKpi title="Facturado" value={money(totals.billed)} detail={`${data.invoices.length} comprobantes definitivos`} /><MiniKpi title="Cobrado" value={money(totals.paid)} detail="Pagos confirmados" /><MiniKpi title="Por cobrar" value={money(totals.balance)} detail="Saldos pendientes" /><MiniKpi title="Aceptados por Brevo" value={data.emailConfig.queue?.sent || 0} detail={`${data.emailConfig.queue?.pending || 0} en proceso`} /></section>
     <div className="toolbar span-2"><div className="search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Factura, cliente, documento o habitacion" /></div><StatusFilters values={["all", "paid", "partial", "pending"]} active={filter} onChange={setFilter} /></div>
     <section className="panel span-2"><PanelHeader title="Facturas definitivas" /><div className="data-table invoice-table"><div className="table-row table-head"><span>FACTURA</span><span>CLIENTE</span><span>ESTADIA</span><span>TOTAL</span><span>SALDO</span><span>ESTADO / ACCIONES</span></div>{rows.map((item) => <div className="table-row" key={item.id}><span><b>{item.number}</b><small>{dateText(item.issuedAt, true)}</small><small>{item.reservationCode}</small></span><span><b>{item.guest?.name || "Consumidor final"}</b><small>{item.guest?.documentNumber || "Documento no registrado"}</small><small>{item.guest?.email || "Sin correo"}</small></span><span><b>Hab. {item.roomId}</b><small>{dateText(item.checkIn)} - {dateText(item.checkOut)}</small><small>{item.nights || "-"} noche(s)</small></span><span><b>{money(item.total)}</b><small>{money(item.paid)} cobrado</small></span><span><b className={item.balance > 0 ? "negative" : "positive"}>{money(item.balance)}</b></span><span className="invoice-actions"><Status status={item.paymentStatus} /><IconButton title="Ver comprobante" onClick={() => setInvoice(item)}><Eye size={16} /></IconButton><IconButton title={item.guest?.email ? "Enviar al correo" : "Cliente sin correo registrado"} onClick={() => sendInvoice(item).catch((error) => notify(error.message, "warning"))}><Send size={16} /></IconButton>{item.balance > 0 && <IconButton title="Registrar pago" onClick={() => setPayment(item)}><CreditCard size={16} /></IconButton>}</span></div>)}{!rows.length && <Empty icon={Receipt} text={data.invoices.length ? "No hay facturas con este filtro" : "Las facturas se emiten al completar el checkout"} />}</div></section>
     <section className="panel"><PanelHeader title="Entrega de correos" /><div className="mail-summary"><span><b>{data.emailConfig.queue?.sent || 0}</b><small>Enviados</small></span><span><b>{data.emailConfig.queue?.pending || 0}</b><small>Pendientes</small></span><span><b>{data.emailConfig.queue?.failed || 0}</b><small>Fallidos</small></span></div>{data.notifications.slice(0, 8).map((job) => <div className="mail-row" key={job.id}><span className={`mail-dot ${job.status}`} /><div><b>{eventLabel(job.eventType)}</b><small>{job.to}</small><small>{dateText(job.createdAt, true)} - intento {job.attempts}</small>{job.error && <em>{job.error}</em>}</div><Status status={job.status} />{["failed", "pending_retry", "configuration_error"].includes(job.status) && <IconButton title="Reintentar" onClick={() => retry(job)}><RefreshCw size={15} /></IconButton>}</div>)}{!data.notifications.length && <Empty icon={Mail} text="Aun no existen envios registrados" />}</section>
@@ -458,14 +487,14 @@ function Cash({ data, reload, notify, session }) {
   const [movement, setMovement] = useState(false);
   const open = data.shifts.openShift;
   const allDone = data.checklist.length > 0 && data.checklist.every((item) => checked[item.id]);
-  async function toggle(item) { const done = !checked[item.id]; setChecked({ ...checked, [item.id]: done }); await request(`/operations/checklist/${item.id}`, { method: "PATCH", body: JSON.stringify({ done }) }); }
-  async function openShift() { await request("/finance/shifts/open", { method: "POST", body: JSON.stringify({ shift: values.shift, responsible: session.user.name, initial: values.initial, notes: values.notes }) }); notify("Caja abierta"); reload(); }
-  async function closeShift() { await request("/finance/shifts/close", { method: "POST", body: JSON.stringify({ closed: values.closed, notes: values.notes }) }); notify("Caja cerrada y conciliada"); reload(); }
-  async function addMovement(payload) { await request("/finance/movements", { method: "POST", body: JSON.stringify(payload) }); notify("Movimiento registrado"); setMovement(false); reload(); }
+  async function toggle(item) { const done = !checked[item.id]; setChecked({ ...checked, [item.id]: done }); const result = await attempt(notify, () => request(`/operations/checklist/${item.id}`, { method: "PATCH", body: JSON.stringify({ done }) })); if (!result.ok) setChecked({ ...checked, [item.id]: !done }); }
+  async function openShift() { const result = await attempt(notify, () => request("/finance/shifts/open", { method: "POST", body: JSON.stringify({ shift: values.shift, responsible: session.user.name, initial: values.initial, notes: values.notes }) })); if (!result.ok) return; notify("Caja abierta"); reload(); }
+  async function closeShift() { const result = await attempt(notify, () => request("/finance/shifts/close", { method: "POST", body: JSON.stringify({ closed: values.closed, notes: values.notes }) })); if (!result.ok) return; notify("Caja cerrada y conciliada"); reload(); }
+  async function addMovement(payload) { const result = await attempt(notify, () => request("/finance/movements", { method: "POST", body: JSON.stringify(payload) })); if (!result.ok) return; notify("Movimiento registrado"); setMovement(false); reload(); }
   return <div className="cash-layout"><section className="panel cash-control"><PanelHeader title={open ? "Caja abierta" : "Apertura de caja"} /><div className="cash-status"><WalletCards size={20} /><span><small>Responsable</small><b>{open?.responsible || session.user.name}</b></span><Status status={open ? "open" : "inactive"} /></div>
     <Field label="Turno" type="select" value={open?.shift || values.shift} disabled={Boolean(open)} options={["Manana", "Tarde", "Noche"]} onChange={(shift) => setValues({ ...values, shift })} />
     {!open && <Field label="Fondo inicial" type="number" value={values.initial} onChange={(initial) => setValues({ ...values, initial })} />}
-    {open && <Field label="Efectivo contado al cierre" type="number" value={values.closed} onChange={(closed) => setValues({ ...values, closed })} />}
+    {open && <><div className="calculation cash-reconciliation"><span><small>Fondo inicial</small><b>{money(open.initial)}</b></span><span><small>Entradas en efectivo</small><b>{money(open.cashIncome)}</b></span><span><small>Salidas en efectivo</small><b>{money(open.cashExpense)}</b></span><span><small>Efectivo esperado</small><b>{money(open.expected)}</b></span></div><Field label="Efectivo contado al cierre" type="number" value={values.closed} onChange={(closed) => setValues({ ...values, closed })} /><p className={`cash-difference ${Number(values.closed) - Number(open.expected) < 0 ? "negative" : "positive"}`}>Diferencia estimada: {money(Number(values.closed) - Number(open.expected))}</p></>}
     <Field label="Observaciones" type="textarea" value={values.notes} onChange={(notes) => setValues({ ...values, notes })} />
     <div className="button-row">{open ? <><button className="secondary" onClick={() => setMovement(true)}><Plus size={16} /> Ingreso o gasto</button><button className="primary" onClick={closeShift}><Save size={16} /> Cerrar caja</button></> : <button className="primary" disabled={!allDone} onClick={openShift}><WalletCards size={16} /> Abrir caja</button>}</div></section>
     <section className="panel"><PanelHeader title="Checklist del turno" />{data.checklist.map((item) => <button className="check-item" key={item.id} onClick={() => toggle(item)}><span className={checked[item.id] ? "checked" : ""}>{checked[item.id] && <Check size={14} />}</span>{item.title}</button>)}<div className="check-progress">{Object.values(checked).filter(Boolean).length} de {data.checklist.length} verificados</div></section>
@@ -475,13 +504,19 @@ function Cash({ data, reload, notify, session }) {
 
 function Accounting({ data, reload, notify }) {
   const [movement, setMovement] = useState(false);
-  async function add(payload) { await request("/finance/movements", { method: "POST", body: JSON.stringify(payload) }); notify("Movimiento contable registrado"); setMovement(false); reload(); }
+  async function add(payload) { const result = await attempt(notify, () => request("/finance/movements", { method: "POST", body: JSON.stringify(payload) })); if (!result.ok) return; notify("Movimiento contable registrado"); setMovement(false); reload(); }
   async function download() {
-    const response = await fetch(`${API}/finance/export.xlsx`, { headers: { Authorization: `Bearer ${sessionValue().token}` } });
-    if (!response.ok) throw new Error("No se pudo generar el Excel");
-    const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `wild-incas-contabilidad-${new Date().toISOString().slice(0, 10)}.xlsx`; link.click(); URL.revokeObjectURL(url); notify("Excel contable generado");
+    const result = await attempt(notify, async () => {
+      const response = await fetch(`${API}/finance/export.xlsx`, { headers: { Authorization: `Bearer ${sessionValue().token}` } });
+      if (!response.ok) throw new Error("No se pudo generar el Excel");
+      return response.blob();
+    });
+    if (!result.ok) return;
+    const url = URL.createObjectURL(result.value); const link = document.createElement("a"); link.href = url; link.download = `wild-incas-contabilidad-${new Date().toISOString().slice(0, 10)}.xlsx`; link.click(); URL.revokeObjectURL(url); notify("Excel contable generado");
   }
-  return <><div className="accounting-head"><section className="kpi-grid"><MiniKpi title="Ingresos" value={money(data.summary.income)} /><MiniKpi title="Gastos" value={money(data.summary.expense)} /><MiniKpi title="Utilidad" value={money(data.summary.balance)} /><MiniKpi title="Por cobrar" value={money(data.summary.accountsReceivable)} /></section><div className="button-row"><button className="secondary" onClick={download}><FileSpreadsheet size={17} /> Exportar Excel</button><button className="primary" onClick={() => setMovement(true)}><Plus size={17} /> Movimiento</button></div></div><section className="panel"><PanelHeader title="Libro de movimientos" /><MovementList items={data.movements} detailed /></section>{movement && <MovementModal onClose={() => setMovement(false)} onSubmit={add} />}</>;
+  const validMovements = data.movements.filter((item) => item.status !== "voided");
+  const voidedPayments = data.payments.filter((item) => item.status === "voided");
+  return <><div className="accounting-head"><section className="kpi-grid"><MiniKpi title="Ingresos" value={money(data.summary.income)} /><MiniKpi title="Gastos" value={money(data.summary.expense)} /><MiniKpi title="Utilidad" value={money(data.summary.balance)} /><MiniKpi title="Por cobrar" value={money(data.summary.accountsReceivable)} /></section><div className="button-row"><button className="secondary" onClick={download}><FileSpreadsheet size={17} /> Exportar Excel</button><button className="primary" onClick={() => setMovement(true)}><Plus size={17} /> Movimiento</button></div></div><section className="panel"><PanelHeader title="Libro de movimientos validos" /><MovementList items={validMovements} detailed /></section>{voidedPayments.length > 0 && <section className="panel audit-panel"><PanelHeader title="Correcciones auditadas" /><p>Los pagos anulados no afectan caja, ingresos ni exportaciones. Se conservan para trazabilidad.</p><PaymentList items={voidedPayments} /></section>}{movement && <MovementModal onClose={() => setMovement(false)} onSubmit={add} />}</>;
 }
 
 function Employees({ data, reload, notify }) {
@@ -489,20 +524,19 @@ function Employees({ data, reload, notify }) {
   async function create(values) {
     const username = values.username || values.email.split("@")[0]; const password = values.password || `${username}#2026`;
     const role = data.roles.find((item) => item.id === values.roleId);
-    await request("/employees", { method: "POST", body: JSON.stringify({ ...values, username, role: role?.name, modules: values.modules?.length ? values.modules : role?.modules || [] }) });
-    await request("/auth/users", { method: "POST", body: JSON.stringify({ name: values.name, username, email: values.email, password, roleId: values.roleId, modules: values.modules }) });
-    const mail = await request("/notifications/employees/welcome", { method: "POST", body: JSON.stringify({ to: values.email, name: values.name, username, password, role: role?.name, idempotencyKey: `employee-welcome:${username}` }) });
-    notify(mail.status === "sent" ? "Empleado creado y acceso enviado" : "Empleado creado; correo de acceso en cola", mail.status === "sent" ? "success" : "warning"); setCreating(false); reload();
+    const result = await attempt(notify, () => request("/employees/onboard", { method: "POST", body: JSON.stringify({ ...values, username, password, role: role?.name, modules: values.modules?.length ? values.modules : role?.modules || [] }) }));
+    if (!result.ok) return;
+    notify(result.value.notification?.status === "sent" ? "Empleado creado y acceso aceptado por Brevo" : "Empleado y acceso creados; correo en cola", result.value.notification?.status === "sent" ? "success" : "warning"); setCreating(false); reload();
   }
-  async function update(values) { await request(`/employees/${values.id}`, { method: "PATCH", body: JSON.stringify(values) }); notify("Empleado actualizado"); setEditing(null); reload(); }
+  async function update(values) { const result = await attempt(notify, () => request(`/employees/${values.id}`, { method: "PATCH", body: JSON.stringify(values) })); if (!result.ok) return; notify("Empleado y permisos de acceso actualizados"); setEditing(null); reload(); }
   return <><div className="toolbar"><div className="shift-banner"><CalendarCheck size={19} /><span><small>Turno activo</small><b>{data.currentShift?.name || "Sin asignacion"} - {data.currentShift?.shift || ""}</b></span></div><button className="primary" onClick={() => setCreating(true)}><Plus size={17} /> Nuevo empleado</button></div><div className="employee-grid">{data.employees.map((item) => <article className="employee-card" key={item.id}><header><Avatar name={item.name} /><span><b>{item.name}</b><small>{item.role}</small></span><IconButton title="Editar" onClick={() => setEditing(item)}><Pencil size={15} /></IconButton></header><dl><dt>Turno</dt><dd>{item.shift} - {item.hours}</dd><dt>Telefono</dt><dd>{item.phone || "-"}</dd><dt>Correo</dt><dd>{item.email}</dd><dt>Usuario</dt><dd>{item.username}</dd></dl><div className="module-tags">{(item.modules || []).map((module) => <span key={module}>{module}</span>)}</div><footer><small>Desde {item.since}</small><Status status={item.status} /></footer></article>)}</div>{creating && <EmployeeModal roles={data.roles} onClose={() => setCreating(false)} onSubmit={create} />}{editing && <EmployeeModal employee={editing} roles={data.roles} onClose={() => setEditing(null)} onSubmit={update} />}</>;
 }
 
 function Access({ data, reload, notify }) {
   const [creating, setCreating] = useState(false); const [testEmail, setTestEmail] = useState("");
-  async function create(values) { await request("/auth/users", { method: "POST", body: JSON.stringify(values) }); notify("Usuario creado"); setCreating(false); reload(); }
-  async function changeRole(user, roleId) { await request(`/auth/users/${user.id}`, { method: "PATCH", body: JSON.stringify({ roleId }) }); notify("Rol actualizado"); reload(); }
-  async function testMail() { const result = await request("/notifications/test", { method: "POST", body: JSON.stringify({ to: testEmail }) }); notify(result.status === "sent" ? "Correo de prueba enviado" : `Correo en cola: ${result.error || result.status}`, result.status === "sent" ? "success" : "warning"); reload(); }
+  async function create(values) { const result = await attempt(notify, () => request("/auth/users", { method: "POST", body: JSON.stringify(values) })); if (!result.ok) return; notify("Usuario creado"); setCreating(false); reload(); }
+  async function changeRole(user, roleId) { const result = await attempt(notify, () => request(`/auth/users/${user.id}`, { method: "PATCH", body: JSON.stringify({ roleId }) })); if (!result.ok) return; notify("Rol actualizado"); reload(); }
+  async function testMail() { const result = await attempt(notify, () => request("/notifications/test", { method: "POST", body: JSON.stringify({ to: testEmail }) })); if (!result.ok) return; notify(result.value.status === "sent" ? "Correo de prueba aceptado por Brevo" : `Correo en cola: ${result.value.error || result.value.status}`, result.value.status === "sent" ? "success" : "warning"); reload(); }
   return <div className="access-layout"><section className="panel"><PanelHeader title="Usuarios del sistema" action="Nuevo usuario" onClick={() => setCreating(true)} />{data.users.map((user) => <div className="user-row" key={user.id}><Avatar name={user.name} /><span><b>{user.name}</b><small>{user.username} - {user.email || "sin correo"}</small></span><select value={user.roleId} onChange={(e) => changeRole(user, e.target.value)}>{data.roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select><Status status={user.status} /></div>)}</section><section className="panel"><PanelHeader title="Roles y modulos" />{data.roles.map((role) => <article className="role-row" key={role.id}><header><b>{role.name}</b><small>{role.modules.length} permisos</small></header><p>{role.description}</p><div className="module-tags">{role.modules.map((module) => <span key={module}>{module}</span>)}</div></article>)}<div className="email-test"><Field label="Prueba de correo Brevo" value={testEmail} placeholder="correo@ejemplo.com" onChange={setTestEmail} /><button className="primary" disabled={!testEmail} onClick={testMail}><Mail size={16} /> Enviar prueba</button><small>API: {data.emailConfig.apiConfigured ? "configurada" : "pendiente"} - SMTP: {data.emailConfig.smtpConfigured ? "configurado" : "pendiente"}</small></div></section>{creating && <UserModal roles={data.roles} onClose={() => setCreating(false)} onSubmit={create} />}</div>;
 }
 
@@ -512,10 +546,27 @@ function ReservationModal({ reservation, rooms, reservations, onClose, onSubmit 
   const [values, setValues] = useState(reservation ? { ...reservation, ...reservation.guest, action: reservation.status === "checked_in" ? "check_in" : "reserve" } : { name: "", documentType: "Cedula", documentNumber: "", email: "", phone: "", address: "", country: "", checkIn: today, checkOut: tomorrow, exitTime: "11:00", adults: 1, children: 0, roomId: "", nightlyRate: 0, source: "Recepcion", notes: "", action: "check_in" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const eligible = rooms.filter((room) => !["cleaning", "maintenance", "out_of_service"].includes(room.status) && !reservations.some((item) => item.id !== reservation?.id && item.roomId === room.id && ["confirmed", "checked_in"].includes(item.status) && values.checkIn < item.checkOut && values.checkOut > item.checkIn));
+  const eligible = rooms.filter((room) => {
+    const isCurrentRoom = room.id === reservation?.roomId;
+    const physicalStateAllowsUse = isCurrentRoom || (values.action === "check_in"
+      ? room.status === "available"
+      : !["maintenance", "out_of_service"].includes(room.status));
+    const hasDateConflict = reservations.some((item) => item.id !== reservation?.id
+      && item.roomId === room.id
+      && ["confirmed", "checked_in"].includes(item.status)
+      && values.checkIn < item.checkOut
+      && values.checkOut > item.checkIn);
+    return physicalStateAllowsUse && !hasDateConflict;
+  });
   const selected = rooms.find((room) => room.id === values.roomId);
   const nights = Math.max(1, Math.ceil((new Date(values.checkOut || values.checkIn) - new Date(values.checkIn)) / 86400000) || 1);
-  function update(next) { const merged = { ...values, ...next }; const room = rooms.find((item) => item.id === merged.roomId); if (next.roomId && !reservation) merged.nightlyRate = room?.rate || 0; setValues(merged); }
+  function update(next) {
+    const merged = { ...values, ...next };
+    const room = rooms.find((item) => item.id === merged.roomId);
+    if (next.roomId && !reservation) merged.nightlyRate = room?.rate || 0;
+    if (next.action === "check_in" && room && room.id !== reservation?.roomId && room.status !== "available") merged.roomId = "";
+    setValues(merged);
+  }
   async function submit() {
     if (busy) return;
     setBusy(true);
@@ -568,15 +619,15 @@ function PaymentModal({ reservation, payments, onClose, onSubmit }) {
   </Modal>;
 }
 
-function ReservationDetail({ item, payments, onClose }) { return <Modal title={`${item.code} - ${item.guest?.name}`} onClose={onClose} size="large"><div className="detail-grid"><Info label="Estado"><Status status={item.status} /></Info><Info label="Habitacion">Hab. {item.roomId} - {item.roomType}</Info><Info label="Estadia">{dateText(item.checkIn)} - {dateText(item.checkOut)}</Info><Info label="Contacto">{item.guest?.email || "-"} / {item.guest?.phone || "-"}</Info></div><h4>Detalle de la cuenta</h4><LineItems lines={item.lines || []} /><div className="invoice-total"><span>Total de estadia</span><strong>{money(item.total)}</strong></div><h4>Pagos</h4><PaymentList items={payments.filter((payment) => payment.reservationId === item.id)} /></Modal>; }
+function ReservationDetail({ item, payments, onClose }) { const account = paymentSummary(payments, item.id, item.total); return <Modal title={`${item.code} - ${item.guest?.name}`} onClose={onClose} size="large"><div className="detail-grid"><Info label="Estado"><Status status={isOverdueStay(item) ? "overdue" : item.status} /></Info><Info label="Habitacion">Hab. {item.roomId} - {item.roomType}</Info><Info label="Estadia">{dateText(item.checkIn)} - {dateText(item.checkOut)}</Info><Info label="Contacto">{item.guest?.email || "-"} / {item.guest?.phone || "-"}</Info></div><h4>Detalle de la cuenta</h4><LineItems lines={item.lines || []} /><div className="calculation"><span><small>Total</small><b>{money(item.total)}</b></span><span><small>Pagado</small><b>{money(account.paid)}</b></span><span><small>Pendiente</small><b>{money(account.balance)}</b></span><span><small>Sobrepago</small><b className={account.overpaid > 0 ? "negative" : ""}>{money(account.overpaid)}</b></span></div><h4>Pagos</h4><PaymentList items={payments.filter((payment) => payment.reservationId === item.id)} /></Modal>; }
 
 function GuestHistoryModal({ guest, stays, payments, onClose }) {
   return <Modal title={`Historial - ${guest.name}`} onClose={onClose} size="large">
     <div className="detail-grid"><Info label="Documento">{guest.documentType} {guest.documentNumber || "-"}</Info><Info label="Correo">{guest.email || "-"}</Info><Info label="Telefono">{guest.phone || "-"}</Info><Info label="Estadias registradas">{stays.length}</Info></div>
     <h4>Estadias y saldos</h4>
     <div className="history-list">{stays.map((stay) => {
-      const paid = paymentTotal(payments, stay.id);
-      return <article key={stay.id}><span><b>{stay.code} - Hab. {stay.roomId}</b><small>{dateText(stay.checkIn)} - {dateText(stay.checkOut)} ({stay.nights} noche(s))</small></span><span><b>{money(stay.total)}</b><small>{money(paid)} pagado / {money(Math.max(0, stay.total - paid))} pendiente</small></span><Status status={stay.status} /></article>;
+      const account = paymentSummary(payments, stay.id, stay.total);
+      return <article key={stay.id}><span><b>{stay.code} - Hab. {stay.roomId}</b><small>{dateText(stay.checkIn)} - {dateText(stay.checkOut)} ({stay.nights} noche(s))</small></span><span><b>{money(stay.total)}</b><small>{money(account.paid)} pagado / {money(account.balance)} pendiente</small>{account.overpaid > 0 && <small className="negative">Sobrepago {money(account.overpaid)}</small>}</span><Status status={isOverdueStay(stay) ? "overdue" : stay.status} /></article>;
     })}{!stays.length && <Empty icon={BookOpenCheck} text="Este huesped aun no tiene estadias" />}</div>
   </Modal>;
 }
@@ -610,7 +661,7 @@ function InvoiceModal({ invoice, payments, delivery, onSend, onVoid, onClose }) 
       </section>
       <section className="invoice-customer">
         <div><small>Huesped / cliente</small><b>{invoice.guest?.name || "Consumidor final"}</b><span>{invoice.guest?.documentType || "Documento"}: {invoice.guest?.documentNumber || "No registrado"}</span><span>{invoice.guest?.address || "Direccion no registrada"}</span></div>
-        <div><small>Contacto y entrega</small><b>{invoice.guest?.email || "Correo no registrado"}</b><span>{invoice.guest?.phone || "Telefono no registrado"}</span><span className={`delivery-line ${delivery?.status || "not_sent"}`}>{delivery?.status === "sent" ? "Correo entregado al proveedor" : delivery ? labels[delivery.status] || delivery.status : "Correo pendiente de envio"}</span></div>
+        <div><small>Contacto y entrega</small><b>{invoice.guest?.email || "Correo no registrado"}</b><span>{invoice.guest?.phone || "Telefono no registrado"}</span><span className={`delivery-line ${delivery?.status || "not_sent"}`}>{delivery?.status === "sent" ? "Correo aceptado por Brevo" : delivery ? labels[delivery.status] || delivery.status : "Correo pendiente de envio"}</span></div>
       </section>
       <div className="invoice-detail-title"><span>Detalle facturado</span><small>Valores expresados en USD</small></div>
       <LineItems lines={invoice.lines || []} />
@@ -626,7 +677,7 @@ function InvoiceModal({ invoice, payments, delivery, onSend, onVoid, onClose }) 
 
 function RoomModal({ room, onClose, onSubmit }) { const [values, setValues] = useState(room); return <Modal title={room._new ? "Nueva habitacion" : `Editar habitacion ${room.id}`} onClose={onClose}><div className="form-grid"><Field label="Numero" value={values.id} disabled={!values._new} onChange={(id) => setValues({ ...values, id })} /><Field label="Piso" type="number" value={values.floor} onChange={(floor) => setValues({ ...values, floor })} /><Field label="Tipo" value={values.type} onChange={(type) => setValues({ ...values, type })} /><Field label="Capacidad" type="number" min="1" value={values.capacity} onChange={(capacity) => setValues({ ...values, capacity })} /><Field label="Tarifa por noche" type="number" value={values.rate} onChange={(rate) => setValues({ ...values, rate })} /><Field label="Estado" type="select" options={[{ value: "available", label: "Disponible" }, { value: "occupied", label: "Ocupada" }, { value: "cleaning", label: "En limpieza" }, { value: "maintenance", label: "Mantenimiento" }, { value: "out_of_service", label: "Fuera de servicio" }]} value={values.status} onChange={(status) => setValues({ ...values, status })} /></div><Field label="Notas operativas" type="textarea" value={values.notes} onChange={(notes) => setValues({ ...values, notes })} /><button className="primary full" onClick={() => onSubmit(values)}><Save size={16} /> Guardar habitacion</button></Modal>; }
 
-function CleaningModal({ rooms, onClose, onSubmit }) { const [values, setValues] = useState({ roomId: rooms[0]?.id || "", notes: "Limpieza completa, cambio de lenceria y revision de inventario" }); return <Modal title="Nueva tarea de limpieza" onClose={onClose}><Field label="Habitacion" type="select" options={rooms.map((room) => ({ value: room.id, label: `Hab. ${room.id} - ${room.type} - ${labels[room.status]}` }))} value={values.roomId} onChange={(roomId) => setValues({ ...values, roomId })} /><Field label="Trabajo requerido" type="textarea" value={values.notes} onChange={(notes) => setValues({ ...values, notes })} /><button className="primary full" onClick={() => onSubmit(values)}><Sparkles size={16} /> Crear tarea</button></Modal>; }
+function CleaningModal({ rooms, onClose, onSubmit }) { const eligible = rooms.filter((room) => room.status === "available"); const [values, setValues] = useState({ roomId: eligible[0]?.id || "", notes: "Limpieza completa, cambio de lenceria y revision de inventario" }); return <Modal title="Nueva tarea de limpieza" onClose={onClose}>{eligible.length ? <><Field label="Habitacion disponible" type="select" options={eligible.map((room) => ({ value: room.id, label: `Hab. ${room.id} - ${room.type}` }))} value={values.roomId} onChange={(roomId) => setValues({ ...values, roomId })} /><Field label="Trabajo requerido" type="textarea" value={values.notes} onChange={(notes) => setValues({ ...values, notes })} /><button className="primary full" disabled={!values.roomId} onClick={() => onSubmit(values)}><Sparkles size={16} /> Crear tarea</button></> : <Empty icon={BedDouble} text="No hay habitaciones disponibles que puedan enviarse a limpieza" />}</Modal>; }
 
 function IncidentModal({ rooms, onClose, onSubmit }) { const [values, setValues] = useState({ title: "", description: "", category: "general", priority: "media", roomId: "", actionRequired: "" }); return <Modal title="Nueva novedad" onClose={onClose}><div className="form-grid"><Field label="Que ocurrio" value={values.title} onChange={(title) => setValues({ ...values, title })} /><Field label="Categoria" type="select" options={["general", "incidencia", "mantenimiento", "huesped", "seguridad"]} value={values.category} onChange={(category) => setValues({ ...values, category })} /><Field label="Prioridad" type="select" options={["baja", "media", "alta"]} value={values.priority} onChange={(priority) => setValues({ ...values, priority })} /><Field label="Habitacion" type="select" options={[{ value: "", label: "No aplica" }, ...rooms.map((room) => ({ value: room.id, label: `Hab. ${room.id}` }))]} value={values.roomId} onChange={(roomId) => setValues({ ...values, roomId })} /></div><Field label="Detalle" type="textarea" value={values.description} onChange={(description) => setValues({ ...values, description })} /><Field label="Accion requerida" value={values.actionRequired} onChange={(actionRequired) => setValues({ ...values, actionRequired })} /><button className="primary full" disabled={!values.title || !values.description} onClick={() => onSubmit(values)}><Save size={16} /> Registrar novedad</button></Modal>; }
 
@@ -647,6 +698,12 @@ function MiniKpi({ title, value, detail }) { return <article className="kpi mini
 function Info({ label, children }) { return <div className="info"><small>{label}</small><b>{children}</b></div>; }
 function StatusFilters({ values, active, onChange }) { return <div className="status-filters">{values.map((value) => <button key={value} className={active === value ? "active" : ""} onClick={() => onChange(value)}>{labels[value] || value}</button>)}</div>; }
 function paymentTotal(payments, reservationId) { return Number(payments.filter((item) => item.status !== "voided" && item.reservationId === reservationId).reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2)); }
+function paymentSummary(payments, reservationId, total) { const paid = paymentTotal(payments, reservationId); return { paid, balance: Number(Math.max(0, Number(total || 0) - paid).toFixed(2)), overpaid: Number(Math.max(0, paid - Number(total || 0)).toFixed(2)) }; }
+function isOverdueStay(item) {
+  if (item.status !== "checked_in" || !item.checkOut) return false;
+  const departure = new Date(`${item.checkOut}T${item.exitTime || "11:00"}:00`);
+  return Number.isFinite(departure.getTime()) && departure.getTime() < Date.now();
+}
 function eventLabel(type) { return ({ "reservation-confirmed": "Reserva confirmada", "reservation-modified": "Reserva actualizada", "reservation-cancelled": "Reserva cancelada", "check-in": "Comprobante de check-in", "payment-confirmation": "Confirmacion de pago", "invoice-finalized": "Factura final", "employee-welcome": "Acceso de empleado", test: "Prueba de correo" })[type] || type; }
 function RoomCompact({ room }) { return <div className={`room-compact ${room.status}`}><span><b>{room.id}</b><small>{room.type}</small></span><Status status={room.status} /></div>; }
 function RoomLegend() { return <div className="legend">{["available", "occupied", "cleaning", "maintenance", "out_of_service"].map((status) => <span key={status}><i className={status} />{labels[status]}</span>)}</div>; }
@@ -654,7 +711,7 @@ function AgendaBlock({ title, items = [], empty }) { return <div className="agen
 function RoomCard({ room, reservation, onEdit }) { return <article className="room-card"><header><span><b>{room.id}</b><small>Piso {room.floor}</small></span><Status status={room.status} /></header><h3>{room.type}</h3><dl><dt>Capacidad</dt><dd>{room.capacity} personas</dd><dt>Tarifa</dt><dd>{money(room.rate)} / noche</dd><dt>Ultima limpieza</dt><dd>{room.lastCleaned || "-"}</dd></dl>{reservation && <div className="occupant"><b>{reservation.guest?.name}</b><small>Salida {dateText(reservation.checkOut)}</small></div>}{(room.housekeepingNotes || room.notes) && <p className="room-note">{room.housekeepingNotes || room.notes}</p>}<footer><IconButton title="Editar habitacion" onClick={onEdit}><Pencil size={16} /></IconButton></footer></article>; }
 function WorkIncident({ item }) { return <article className="work-item"><span className="work-icon warning"><AlertTriangle size={18} /></span><div><b>{item.title}</b><p>{item.description}</p><small>{item.roomId ? `Hab. ${item.roomId} - ` : ""}{dateText(item.createdAt, true)}</small></div><Status status={item.status} /></article>; }
 function LineItems({ lines }) { return <div className="line-items"><div className="line head"><span>DETALLE</span><span>CANT.</span><span>PRECIO</span><span>TOTAL</span></div>{lines.map((line) => <div className="line" key={line.id}><span><b>{line.description}</b><small>{line.category}</small></span><span>{line.quantity}</span><span>{money(line.unitPrice)}</span><span><b>{money(line.total)}</b></span></div>)}</div>; }
-function PaymentList({ items }) { return items.length ? <div className="payment-list">{items.map((item) => <div key={item.id}><span><CreditCard size={16} /><b>{item.method}</b><small>{dateText(item.createdAt, true)}{item.reference ? ` - ${item.reference}` : ""}</small></span><strong>{money(item.amount)}</strong></div>)}</div> : <Empty icon={CreditCard} text="No hay pagos registrados" />; }
+function PaymentList({ items }) { return items.length ? <div className="payment-list">{items.map((item) => <div key={item.id} className={item.status === "voided" ? "voided" : ""}><span><CreditCard size={16} /><b>{item.method} {item.status === "voided" ? "- Anulado" : ""}</b><small>{dateText(item.createdAt, true)}{item.reference ? ` - ${item.reference}` : ""}{item.voidReason ? ` - ${item.voidReason}` : ""}</small></span><strong>{money(item.amount)}</strong></div>)}</div> : <Empty icon={CreditCard} text="No hay pagos registrados" />; }
 function MovementList({ items, detailed = false }) { return <div className="movement-list">{items.map((item) => <article key={item.id}><span className={`movement-icon ${item.type}`}>{item.type === "income" ? "+" : "-"}</span><div><b>{item.concept}</b><small>{dateText(item.date)} - {item.category || "Sin categoria"}{item.reference ? ` - ${item.reference}` : ""}</small>{detailed && item.notes && <em>{item.notes}</em>}</div><span><small>{item.method}</small><strong className={item.type}>{item.type === "income" ? "+" : "-"}{money(item.amount)}</strong></span></article>)}{!items.length && <Empty icon={TrendingUp} text="No hay movimientos registrados" />}</div>; }
 function ShiftTable({ items }) { return <div className="data-table shift-table"><div className="table-row table-head"><span>FECHA</span><span>TURNO</span><span>RESPONSABLE</span><span>INICIAL</span><span>ESPERADO</span><span>CIERRE</span><span>DIFERENCIA</span></div>{items.map((item) => <div className="table-row" key={item.id}><span>{dateText(item.date)}</span><span>{item.shift}</span><span>{item.responsible}</span><span>{money(item.initial)}</span><span>{money(item.expected)}</span><span>{money(item.closed)}</span><span className={item.difference < 0 ? "negative" : "positive"}>{money(item.difference)}</span></div>)}</div>; }
 
