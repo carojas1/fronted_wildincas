@@ -147,10 +147,6 @@ async function request(path, options = {}) {
   return payload.data;
 }
 
-async function safeRequest(path, fallback) {
-  try { return await request(path); } catch (error) { console.warn(path, error.message); return fallback; }
-}
-
 async function attempt(notify, action) {
   try {
     return { ok: true, value: await action() };
@@ -181,8 +177,15 @@ function App() {
     setLoading(true);
     const sources = viewSources[target] || viewSources.dashboard;
     try {
-      const values = await Promise.all(sources.map(([, path, fallback]) => safeRequest(path, fallback)));
-      setData((current) => ({ ...current, ...Object.fromEntries(sources.map(([key], index) => [key, values[index]])) }));
+      const results = await Promise.allSettled(sources.map(([, path]) => request(path)));
+      const updates = {};
+      const failures = [];
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") updates[sources[index][0]] = result.value;
+        else failures.push(sources[index][1]);
+      });
+      if (Object.keys(updates).length) setData((current) => ({ ...current, ...updates }));
+      if (failures.length) notify(`No se actualizaron ${failures.length} fuente(s). Se conservaron los ultimos datos validos.`, "warning");
     } finally {
       setLoading(false);
     }
