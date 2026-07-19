@@ -7,8 +7,10 @@ import {
   BellRing,
   BookOpenCheck,
   BriefcaseBusiness,
+  Building2,
   CalendarCheck,
   Check,
+  CheckCircle2,
   ChevronRight,
   ClipboardList,
   CreditCard,
@@ -26,6 +28,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  Send,
   ShieldCheck,
   Sparkles,
   TrendingUp,
@@ -235,6 +238,14 @@ function Login({ onLogin }) {
   const [values, setValues] = useState({ username: "apolo", password: "admin123" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [warming, setWarming] = useState(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(API.replace(/\/api\/?$/, "/health"), { signal: controller.signal })
+      .catch(() => null)
+      .finally(() => setWarming(false));
+    return () => controller.abort();
+  }, []);
   async function submit(event) {
     event.preventDefault(); setBusy(true); setError("");
     try {
@@ -247,7 +258,9 @@ function Login({ onLogin }) {
     <form className="login-panel" onSubmit={submit}><div className="login-icon"><ShieldCheck size={22} /></div><p>ACCESO AL SISTEMA</p><h2>Bienvenido</h2>
       <Field label="Usuario" value={values.username} onChange={(username) => setValues({ ...values, username })} autoComplete="username" />
       <Field label="Contrasena" type="password" value={values.password} onChange={(password) => setValues({ ...values, password })} autoComplete="current-password" />
-      <button className="primary" disabled={busy}>{busy ? "Validando..." : "Ingresar"}</button>{error && <div className="form-error"><AlertTriangle size={16} /> {error}</div>}
+      <button className="primary" disabled={busy}>{busy ? "Conectando con la operacion..." : "Ingresar"}</button>
+      <div className={`login-connection ${warming ? "warming" : "ready"}`}><i />{warming ? "Preparando servicios de produccion" : "Servicios listos para iniciar sesion"}</div>
+      {error && <div className="form-error"><AlertTriangle size={16} /> {error}</div>}
     </form>
   </div>;
 }
@@ -257,8 +270,8 @@ function Dashboard({ data, setView }) {
   const occupancy = data.rooms.length ? Math.round((occupied / data.rooms.length) * 100) : 0;
   const cards = [
     ["Ocupacion actual", `${occupancy}%`, `${occupied} de ${data.rooms.length} habitaciones`, BedDouble],
-    ["Ingresos acumulados", money(data.metrics.revenue), `${data.metrics.invoices || 0} facturas finales`, TrendingUp],
-    ["Tarifa promedio", money(data.metrics.averageDailyRate), `${data.metrics.roomNights || 0} noches facturadas`, CalendarCheck],
+    ["Cobros confirmados", money(data.metrics.collected), "Pagos efectivos registrados", TrendingUp],
+    ["Facturacion final", money(data.metrics.revenue), `${data.metrics.invoices || 0} comprobantes emitidos`, Receipt],
     ["Por cobrar", money(data.metrics.accountsReceivable), "Saldos de facturas finales", WalletCards]
   ];
   return <div className="dashboard-stack">
@@ -299,7 +312,7 @@ function Reservations({ data, reload, notify, session }) {
     notify("Consumo agregado a la estadia"); setModal(null); reload();
   }
   async function addPayment(item, values) {
-    const result = await request(`/reservations/reservations/${item.id}/payments`, { method: "POST", body: JSON.stringify({ ...values, actor: session.user.name, idempotencyKey: `ui-payment:${item.id}:${Date.now()}` }) });
+    const result = await request(`/reservations/reservations/${item.id}/payments`, { method: "POST", body: JSON.stringify({ ...values, actor: session.user.name }) });
     notify(`Pago registrado. Cambio: ${money(result.payment.change)}. ${result.notification?.status === "sent" ? "Correo enviado." : "Correo en cola."}`); setModal(null); reload();
   }
   async function checkout(item) {
@@ -319,7 +332,7 @@ function Reservations({ data, reload, notify, session }) {
         {["confirmed", "checked_in"].includes(item.status) && <IconButton title="Editar o ampliar estadia" onClick={() => setModal({ type: "edit", item })}><Pencil size={16} /></IconButton>}
         {item.status === "confirmed" && <IconButton title="Check-in" onClick={() => checkIn(item)}><LogIn size={16} /></IconButton>}
         {item.status === "checked_in" && <IconButton title="Agregar cargo o servicio" onClick={() => setModal({ type: "charge", item })}><Plus size={16} /></IconButton>}
-        {["confirmed", "checked_in", "checked_out"].includes(item.status) && <IconButton title="Registrar pago" onClick={() => setModal({ type: "payment", item })}><CreditCard size={16} /></IconButton>}
+        {["confirmed", "checked_in", "checked_out"].includes(item.status) && paymentTotal(data.payments, item.id) < item.total && <IconButton title="Registrar pago" onClick={() => setModal({ type: "payment", item })}><CreditCard size={16} /></IconButton>}
         {item.status === "checked_in" && <IconButton title="Checkout" onClick={() => checkout(item)}><LogOut size={16} /></IconButton>}
         {item.status === "confirmed" && <IconButton title="Cancelar" danger onClick={() => cancel(item)}><X size={16} /></IconButton>}
       </span></div>)}
@@ -395,17 +408,46 @@ function Logbook({ data, reload, notify, session }) {
 }
 
 function Billing({ data, reload, notify }) {
-  const [invoice, setInvoice] = useState(null); const [payment, setPayment] = useState(null);
+  const [invoice, setInvoice] = useState(null);
+  const [payment, setPayment] = useState(null);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all");
+  const rows = data.invoices.filter((item) => (filter === "all" || item.paymentStatus === filter)
+    && [item.number, item.reservationCode, item.guest?.name, item.guest?.documentNumber, item.roomId]
+      .some((value) => String(value || "").toLowerCase().includes(query.toLowerCase())));
+  const totals = data.invoices.reduce((summary, item) => ({
+    billed: summary.billed + Number(item.total || 0),
+    paid: summary.paid + Number(item.paid || 0),
+    balance: summary.balance + Number(item.balance || 0)
+  }), { billed: 0, paid: 0, balance: 0 });
   async function pay(item, values) {
     const reservation = data.reservations.find((row) => row.id === item.reservationId);
     if (!reservation) throw new Error("No se encontro la reserva de esta factura");
-    await request(`/reservations/reservations/${reservation.id}/payments`, { method: "POST", body: JSON.stringify({ ...values, idempotencyKey: `invoice-payment:${item.id}:${Date.now()}` }) });
+    await request(`/reservations/reservations/${reservation.id}/payments`, { method: "POST", body: JSON.stringify(values) });
     notify("Pago aplicado a la factura"); setPayment(null); reload();
   }
-    async function retry(job) { await request(`/notifications/events/${job.id}/retry`, { method: "POST", body: "{}" }); notify("Correo agregado a la cola de reintento"); reload(); }
-  return <div className="billing-layout"><section className="panel span-2"><PanelHeader title="Facturas definitivas" /><div className="data-table invoice-table"><div className="table-row table-head"><span>FACTURA</span><span>CLIENTE</span><span>ESTADIA</span><span>TOTAL</span><span>SALDO</span><span>ESTADO / ACCIONES</span></div>{data.invoices.map((item) => <div className="table-row" key={item.id}><span><b>{item.number}</b><small>{dateText(item.issuedAt, true)}</small><small>{item.reservationCode}</small></span><span><b>{item.guest?.name}</b><small>{item.guest?.documentNumber || "Consumidor final"}</small></span><span><b>Hab. {item.roomId}</b><small>{dateText(item.checkIn)} - {dateText(item.checkOut)}</small></span><span><b>{money(item.total)}</b><small>{money(item.paid)} pagado</small></span><span><b>{money(item.balance)}</b></span><span className="invoice-actions"><Status status={item.paymentStatus} /><IconButton title="Ver factura" onClick={() => setInvoice(item)}><Eye size={16} /></IconButton>{item.balance > 0 && <IconButton title="Registrar pago" onClick={() => setPayment(item)}><CreditCard size={16} /></IconButton>}</span></div>)}{!data.invoices.length && <Empty icon={Receipt} text="Las facturas definitivas aparecen al completar el checkout" />}</div></section>
-    <section className="panel"><PanelHeader title="Entrega de correos" /><div className="mail-summary"><span><b>{data.emailConfig.queue?.sent || 0}</b><small>Enviados</small></span><span><b>{data.emailConfig.queue?.pending || 0}</b><small>Pendientes</small></span><span><b>{data.emailConfig.queue?.failed || 0}</b><small>Fallidos</small></span></div>{data.notifications.slice(0, 8).map((job) => <div className="mail-row" key={job.id}><span className={`mail-dot ${job.status}`} /><div><b>{labels[job.eventType] || eventLabel(job.eventType)}</b><small>{job.to}</small><small>{dateText(job.createdAt, true)} - intento {job.attempts}</small>{job.error && <em>{job.error}</em>}</div><Status status={job.status} />{["failed", "pending_retry", "configuration_error"].includes(job.status) && <IconButton title="Reintentar" onClick={() => retry(job)}><RefreshCw size={15} /></IconButton>}</div>)}</section>
-    {invoice && <InvoiceModal invoice={invoice} payments={data.payments.filter((item) => item.invoiceId === invoice.id || item.reservationId === invoice.reservationId)} onClose={() => setInvoice(null)} />}
+  async function retry(job) { await request(`/notifications/events/${job.id}/retry`, { method: "POST", body: "{}" }); notify("Correo agregado a la cola de reintento"); reload(); }
+  async function sendInvoice(item) {
+    if (!item.guest?.email) throw new Error("Registra el correo del cliente antes de enviar la factura");
+    const reservation = data.reservations.find((row) => row.id === item.reservationId) || { code: item.reservationCode, roomId: item.roomId, checkIn: item.checkIn, checkOut: item.checkOut };
+    await request("/notifications/events", { method: "POST", body: JSON.stringify({ eventType: "invoice-finalized", to: item.guest.email, idempotencyKey: `invoice-manual:${item.id}:${Date.now()}`, payload: { invoice: item, reservation, guest: item.guest } }) });
+    notify(`Factura ${item.number} agregada a la cola de correo`); reload();
+  }
+  async function voidPayment(item) {
+    const reason = window.prompt("Motivo de anulacion del pago", "Registro duplicado o correccion autorizada");
+    if (reason === null) return;
+    await request(`/finance/payments/${item.id}/void`, { method: "POST", body: JSON.stringify({ reason }) });
+    notify("Pago anulado con trazabilidad contable", "warning"); setInvoice(null); reload();
+  }
+  const invoicePayments = invoice ? data.payments.filter((item) => item.invoiceId === invoice.id || item.reservationId === invoice.reservationId) : [];
+  const invoiceDelivery = invoice ? data.notifications.find((job) => job.payload?.invoice?.id === invoice.id) : null;
+  return <div className="billing-layout">
+    <section className="kpi-grid billing-kpis span-2"><MiniKpi title="Facturado" value={money(totals.billed)} detail={`${data.invoices.length} comprobantes definitivos`} /><MiniKpi title="Cobrado" value={money(totals.paid)} detail="Pagos confirmados" /><MiniKpi title="Por cobrar" value={money(totals.balance)} detail="Saldos pendientes" /><MiniKpi title="Correos entregados" value={data.emailConfig.queue?.sent || 0} detail={`${data.emailConfig.queue?.pending || 0} en proceso`} /></section>
+    <div className="toolbar span-2"><div className="search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Factura, cliente, documento o habitacion" /></div><StatusFilters values={["all", "paid", "partial", "pending"]} active={filter} onChange={setFilter} /></div>
+    <section className="panel span-2"><PanelHeader title="Facturas definitivas" /><div className="data-table invoice-table"><div className="table-row table-head"><span>FACTURA</span><span>CLIENTE</span><span>ESTADIA</span><span>TOTAL</span><span>SALDO</span><span>ESTADO / ACCIONES</span></div>{rows.map((item) => <div className="table-row" key={item.id}><span><b>{item.number}</b><small>{dateText(item.issuedAt, true)}</small><small>{item.reservationCode}</small></span><span><b>{item.guest?.name || "Consumidor final"}</b><small>{item.guest?.documentNumber || "Documento no registrado"}</small><small>{item.guest?.email || "Sin correo"}</small></span><span><b>Hab. {item.roomId}</b><small>{dateText(item.checkIn)} - {dateText(item.checkOut)}</small><small>{item.nights || "-"} noche(s)</small></span><span><b>{money(item.total)}</b><small>{money(item.paid)} cobrado</small></span><span><b className={item.balance > 0 ? "negative" : "positive"}>{money(item.balance)}</b></span><span className="invoice-actions"><Status status={item.paymentStatus} /><IconButton title="Ver comprobante" onClick={() => setInvoice(item)}><Eye size={16} /></IconButton><IconButton title={item.guest?.email ? "Enviar al correo" : "Cliente sin correo registrado"} onClick={() => sendInvoice(item).catch((error) => notify(error.message, "warning"))}><Send size={16} /></IconButton>{item.balance > 0 && <IconButton title="Registrar pago" onClick={() => setPayment(item)}><CreditCard size={16} /></IconButton>}</span></div>)}{!rows.length && <Empty icon={Receipt} text={data.invoices.length ? "No hay facturas con este filtro" : "Las facturas se emiten al completar el checkout"} />}</div></section>
+    <section className="panel"><PanelHeader title="Entrega de correos" /><div className="mail-summary"><span><b>{data.emailConfig.queue?.sent || 0}</b><small>Enviados</small></span><span><b>{data.emailConfig.queue?.pending || 0}</b><small>Pendientes</small></span><span><b>{data.emailConfig.queue?.failed || 0}</b><small>Fallidos</small></span></div>{data.notifications.slice(0, 8).map((job) => <div className="mail-row" key={job.id}><span className={`mail-dot ${job.status}`} /><div><b>{eventLabel(job.eventType)}</b><small>{job.to}</small><small>{dateText(job.createdAt, true)} - intento {job.attempts}</small>{job.error && <em>{job.error}</em>}</div><Status status={job.status} />{["failed", "pending_retry", "configuration_error"].includes(job.status) && <IconButton title="Reintentar" onClick={() => retry(job)}><RefreshCw size={15} /></IconButton>}</div>)}{!data.notifications.length && <Empty icon={Mail} text="Aun no existen envios registrados" />}</section>
+    <section className="panel"><PanelHeader title="Pagos recientes" /><PaymentList items={data.payments.filter((item) => item.status !== "voided").slice(0, 8)} /></section>
+    {invoice && <InvoiceModal invoice={invoice} payments={invoicePayments} delivery={invoiceDelivery} onSend={() => sendInvoice(invoice)} onVoid={voidPayment} onClose={() => setInvoice(null)} />}
     {payment && <PaymentModal reservation={{ ...data.reservations.find((row) => row.id === payment.reservationId), total: payment.total }} payments={data.payments} onClose={() => setPayment(null)} onSubmit={(values) => pay(payment, values)} />}
   </div>;
 }
@@ -468,11 +510,20 @@ function ReservationModal({ reservation, rooms, reservations, onClose, onSubmit 
   const today = new Date().toISOString().slice(0, 10);
   const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const [values, setValues] = useState(reservation ? { ...reservation, ...reservation.guest, action: reservation.status === "checked_in" ? "check_in" : "reserve" } : { name: "", documentType: "Cedula", documentNumber: "", email: "", phone: "", address: "", country: "", checkIn: today, checkOut: tomorrow, exitTime: "11:00", adults: 1, children: 0, roomId: "", nightlyRate: 0, source: "Recepcion", notes: "", action: "check_in" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const eligible = rooms.filter((room) => !["cleaning", "maintenance", "out_of_service"].includes(room.status) && !reservations.some((item) => item.id !== reservation?.id && item.roomId === room.id && ["confirmed", "checked_in"].includes(item.status) && values.checkIn < item.checkOut && values.checkOut > item.checkIn));
   const selected = rooms.find((room) => room.id === values.roomId);
   const nights = Math.max(1, Math.ceil((new Date(values.checkOut || values.checkIn) - new Date(values.checkIn)) / 86400000) || 1);
   function update(next) { const merged = { ...values, ...next }; const room = rooms.find((item) => item.id === merged.roomId); if (next.roomId && !reservation) merged.nightlyRate = room?.rate || 0; setValues(merged); }
-  return <Modal title={reservation ? `Editar o ampliar ${reservation.code}` : "Registrar nueva estadia"} onClose={onClose} size="large"><div className="modal-section"><h4>Datos del huesped</h4><div className="form-grid"><Field label="Nombre completo" required value={values.name} onChange={(name) => update({ name })} /><Field label="Cedula o RUC" value={values.documentNumber} onChange={(documentNumber) => update({ documentNumber })} /><Field label="Tipo de documento" type="select" options={["Cedula", "RUC", "Pasaporte"]} value={values.documentType} onChange={(documentType) => update({ documentType })} /><Field label="Correo" type="email" value={values.email} onChange={(email) => update({ email })} /><Field label="Telefono" value={values.phone} onChange={(phone) => update({ phone })} /><Field label="Nacionalidad" value={values.country} onChange={(country) => update({ country })} /><Field label="Direccion" value={values.address} onChange={(address) => update({ address })} /></div></div><div className="modal-section"><h4>Estadia</h4><div className="form-grid"><Field label="Entrada" type="date" required value={values.checkIn} onChange={(checkIn) => update({ checkIn })} /><Field label="Salida" type="date" required value={values.checkOut} onChange={(checkOut) => update({ checkOut })} /><Field label="Hora de salida" type="time" value={values.exitTime} onChange={(exitTime) => update({ exitTime })} /><Field label="Adultos" type="number" min="1" value={values.adults} onChange={(adults) => update({ adults })} /><Field label="Ninos" type="number" min="0" value={values.children} onChange={(children) => update({ children })} /><Field label="Origen" type="select" options={["Recepcion", "Telefono", "WhatsApp", "Booking", "Web"]} value={values.source} onChange={(source) => update({ source })} /></div><Field label="Habitacion disponible" type="select" value={values.roomId} onChange={(roomId) => update({ roomId })} options={[{ value: "", label: "Seleccionar habitacion" }, ...eligible.map((room) => ({ value: room.id, label: `Hab. ${room.id} - ${room.type} - ${money(room.rate)}/noche` }))]} /><div className="form-grid"><Field label="Tarifa por noche" type="number" value={values.nightlyRate} onChange={(nightlyRate) => update({ nightlyRate })} /><Field label="Accion inicial" type="select" options={[{ value: "reserve", label: "Confirmar reserva" }, { value: "check_in", label: "Ingresar ahora" }]} value={values.action} onChange={(action) => update({ action })} /></div><Field label="Notas internas" type="textarea" value={values.notes} onChange={(notes) => update({ notes })} /></div><div className="calculation"><span><small>Noches</small><b>{nights}</b></span><span><small>Habitacion</small><b>{selected ? `Hab. ${selected.id}` : "-"}</b></span><span><small>Tarifa</small><b>{money(values.nightlyRate)}</b></span><span><small>Total hospedaje</small><b>{money(nights * Number(values.nightlyRate || 0))}</b></span></div><button className="primary full" disabled={!values.name || !values.roomId || !values.checkOut} onClick={() => onSubmit({ ...values, roomType: selected?.type || reservation?.roomType })}><Save size={17} /> {reservation ? "Guardar cambios" : values.action === "check_in" ? "Registrar check-in" : "Confirmar reserva"}</button></Modal>;
+  async function submit() {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try { await onSubmit({ ...values, roomType: selected?.type || reservation?.roomType }); }
+    catch (requestError) { setError(requestError.message || "No se pudo guardar la estadia"); setBusy(false); }
+  }
+  return <Modal title={reservation ? `Editar o ampliar ${reservation.code}` : "Registrar nueva estadia"} onClose={busy ? () => {} : onClose} size="large"><div className="modal-section"><h4>Datos del huesped</h4><div className="form-grid"><Field label="Nombre completo" required value={values.name} onChange={(name) => update({ name })} /><Field label="Cedula o RUC" value={values.documentNumber} onChange={(documentNumber) => update({ documentNumber })} /><Field label="Tipo de documento" type="select" options={["Cedula", "RUC", "Pasaporte"]} value={values.documentType} onChange={(documentType) => update({ documentType })} /><Field label="Correo" type="email" value={values.email} onChange={(email) => update({ email })} /><Field label="Telefono" value={values.phone} onChange={(phone) => update({ phone })} /><Field label="Nacionalidad" value={values.country} onChange={(country) => update({ country })} /><Field label="Direccion" value={values.address} onChange={(address) => update({ address })} /></div></div><div className="modal-section"><h4>Estadia</h4><div className="form-grid"><Field label="Entrada" type="date" required value={values.checkIn} onChange={(checkIn) => update({ checkIn })} /><Field label="Salida" type="date" required value={values.checkOut} onChange={(checkOut) => update({ checkOut })} /><Field label="Hora de salida" type="time" value={values.exitTime} onChange={(exitTime) => update({ exitTime })} /><Field label="Adultos" type="number" min="1" value={values.adults} onChange={(adults) => update({ adults })} /><Field label="Ninos" type="number" min="0" value={values.children} onChange={(children) => update({ children })} /><Field label="Origen" type="select" options={["Recepcion", "Telefono", "WhatsApp", "Booking", "Web"]} value={values.source} onChange={(source) => update({ source })} /></div><Field label="Habitacion disponible" type="select" value={values.roomId} onChange={(roomId) => update({ roomId })} options={[{ value: "", label: "Seleccionar habitacion" }, ...eligible.map((room) => ({ value: room.id, label: `Hab. ${room.id} - ${room.type} - ${money(room.rate)}/noche` }))]} /><div className="form-grid"><Field label="Tarifa por noche" type="number" value={values.nightlyRate} onChange={(nightlyRate) => update({ nightlyRate })} /><Field label="Accion inicial" type="select" options={[{ value: "reserve", label: "Confirmar reserva" }, { value: "check_in", label: "Ingresar ahora" }]} value={values.action} onChange={(action) => update({ action })} /></div><Field label="Notas internas" type="textarea" value={values.notes} onChange={(notes) => update({ notes })} /></div><div className="calculation"><span><small>Noches</small><b>{nights}</b></span><span><small>Habitacion</small><b>{selected ? `Hab. ${selected.id}` : "-"}</b></span><span><small>Tarifa</small><b>{money(values.nightlyRate)}</b></span><span><small>Total hospedaje</small><b>{money(nights * Number(values.nightlyRate || 0))}</b></span></div>{error && <p className="form-error">{error}</p>}<button className="primary full" disabled={busy || !values.name || !values.roomId || !values.checkOut || values.checkOut <= values.checkIn} onClick={submit}><Save size={17} /> {busy ? "Guardando estadia..." : reservation ? "Guardar cambios" : values.action === "check_in" ? "Registrar check-in" : "Confirmar reserva"}</button></Modal>;
 }
 
 function GuestModal({ guest, onClose, onSubmit }) { const [values, setValues] = useState(guest); return <Modal title="Editar huesped" onClose={onClose}><div className="form-grid"><Field label="Nombre" value={values.name} onChange={(name) => setValues({ ...values, name })} /><Field label="Documento" value={values.documentNumber} onChange={(documentNumber) => setValues({ ...values, documentNumber })} /><Field label="Correo" type="email" value={values.email} onChange={(email) => setValues({ ...values, email })} /><Field label="Telefono" value={values.phone} onChange={(phone) => setValues({ ...values, phone })} /><Field label="Nacionalidad" value={values.country} onChange={(country) => setValues({ ...values, country })} /><Field label="Direccion" value={values.address} onChange={(address) => setValues({ ...values, address })} /></div><button className="primary full" onClick={() => onSubmit(values)}><Save size={16} /> Guardar huesped</button></Modal>; }
@@ -492,7 +543,30 @@ function ChargeModal({ reservation, onClose, onSubmit }) {
   </Modal>;
 }
 
-function PaymentModal({ reservation, payments, onClose, onSubmit }) { const totalPaid = paymentTotal(payments, reservation.id); const pending = Math.max(0, Number(reservation.total || 0) - totalPaid); const [values, setValues] = useState({ amount: pending, received: pending, method: "Efectivo", reference: "", notes: "Pago de hospedaje" }); const change = values.method === "Efectivo" ? Math.max(0, Number(values.received || 0) - Number(values.amount || 0)) : 0; return <Modal title={`Registrar pago - ${reservation.code || "factura"}`} onClose={onClose}><div className="calculation"><span><small>Total</small><b>{money(reservation.total)}</b></span><span><small>Pagado</small><b>{money(totalPaid)}</b></span><span><small>Pendiente</small><b>{money(pending)}</b></span><span><small>Cambio</small><b>{money(change)}</b></span></div><div className="form-grid"><Field label="Metodo" type="select" options={["Efectivo", "Transferencia", "Tarjeta", "Deposito"]} value={values.method} onChange={(method) => setValues({ ...values, method, received: method === "Efectivo" ? values.received : values.amount })} /><Field label="Monto aplicado" type="number" value={values.amount} onChange={(amount) => setValues({ ...values, amount })} /><Field label="Recibido del cliente" type="number" value={values.received} disabled={values.method !== "Efectivo"} onChange={(received) => setValues({ ...values, received })} /><Field label="Referencia" value={values.reference} onChange={(reference) => setValues({ ...values, reference })} /></div><Field label="Nota" value={values.notes} onChange={(notes) => setValues({ ...values, notes })} /><button className="primary full" disabled={values.amount <= 0 || (values.method === "Efectivo" && values.received < values.amount)} onClick={() => onSubmit(values)}><CreditCard size={16} /> Confirmar pago</button></Modal>; }
+function PaymentModal({ reservation, payments, onClose, onSubmit }) {
+  const totalPaid = paymentTotal(payments, reservation.id);
+  const pending = Math.max(0, Number(reservation.total || 0) - totalPaid);
+  const [values, setValues] = useState({ amount: pending, received: pending, method: "Efectivo", reference: "", notes: "Pago de hospedaje", idempotencyKey: `payment:${reservation.id}:${globalThis.crypto?.randomUUID?.() || Date.now()}` });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const change = values.method === "Efectivo" ? Math.max(0, Number(values.received || 0) - Number(values.amount || 0)) : 0;
+  const invalid = values.amount <= 0 || values.amount > pending || (values.method === "Efectivo" && values.received < values.amount);
+  async function submit() {
+    if (busy || invalid) return;
+    setBusy(true);
+    setError("");
+    try { await onSubmit(values); }
+    catch (requestError) { setError(requestError.message || "No se pudo registrar el pago"); setBusy(false); }
+  }
+  return <Modal title={`Registrar pago - ${reservation.code || "factura"}`} onClose={busy ? () => {} : onClose}>
+    <div className="calculation"><span><small>Total</small><b>{money(reservation.total)}</b></span><span><small>Pagado</small><b>{money(totalPaid)}</b></span><span><small>Pendiente</small><b>{money(pending)}</b></span><span><small>Cambio</small><b>{money(change)}</b></span></div>
+    <div className="form-grid"><Field label="Metodo" type="select" options={["Efectivo", "Transferencia", "Tarjeta", "Deposito"]} value={values.method} onChange={(method) => setValues({ ...values, method, received: method === "Efectivo" ? values.received : values.amount })} /><Field label="Monto aplicado" type="number" min="0.01" max={pending} step="0.01" value={values.amount} onChange={(amount) => setValues({ ...values, amount })} /><Field label="Recibido del cliente" type="number" min="0" step="0.01" value={values.received} disabled={values.method !== "Efectivo"} onChange={(received) => setValues({ ...values, received })} /><Field label="Referencia" value={values.reference} onChange={(reference) => setValues({ ...values, reference })} /></div>
+    <Field label="Nota" value={values.notes} onChange={(notes) => setValues({ ...values, notes })} />
+    {values.amount > pending && <p className="form-error">El monto supera el saldo pendiente de {money(pending)}.</p>}
+    {error && <p className="form-error">{error}</p>}
+    <button className="primary full" disabled={busy || invalid} onClick={submit}><CreditCard size={16} /> {busy ? "Registrando pago..." : "Confirmar pago"}</button>
+  </Modal>;
+}
 
 function ReservationDetail({ item, payments, onClose }) { return <Modal title={`${item.code} - ${item.guest?.name}`} onClose={onClose} size="large"><div className="detail-grid"><Info label="Estado"><Status status={item.status} /></Info><Info label="Habitacion">Hab. {item.roomId} - {item.roomType}</Info><Info label="Estadia">{dateText(item.checkIn)} - {dateText(item.checkOut)}</Info><Info label="Contacto">{item.guest?.email || "-"} / {item.guest?.phone || "-"}</Info></div><h4>Detalle de la cuenta</h4><LineItems lines={item.lines || []} /><div className="invoice-total"><span>Total de estadia</span><strong>{money(item.total)}</strong></div><h4>Pagos</h4><PaymentList items={payments.filter((payment) => payment.reservationId === item.id)} /></Modal>; }
 
@@ -507,33 +581,45 @@ function GuestHistoryModal({ guest, stays, payments, onClose }) {
   </Modal>;
 }
 
-function InvoiceModal({ invoice, payments, onClose }) {
-  return <Modal title="Comprobante de hospedaje" onClose={onClose} size="large">
-    <div className="invoice-toolbar"><span>Documento definitivo generado al completar el checkout.</span><button className="secondary" onClick={() => window.print()}><Printer size={16} /> Imprimir / guardar PDF</button></div>
+function InvoiceModal({ invoice, payments, delivery, onSend, onVoid, onClose }) {
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const activePayments = payments.filter((item) => item.status !== "voided");
+  async function send() {
+    if (sending || !invoice.guest?.email) return;
+    setSending(true);
+    setError("");
+    try { await onSend(invoice); }
+    catch (requestError) { setError(requestError.message || "No se pudo programar el correo"); }
+    finally { setSending(false); }
+  }
+  return <Modal title="Factura de hospedaje" onClose={onClose} size="invoice">
+    <div className="invoice-toolbar"><span className="invoice-assurance"><CheckCircle2 size={17} /> Documento definitivo guardado en contabilidad</span><div className="invoice-toolbar-actions"><button className="secondary" disabled={sending || !invoice.guest?.email} onClick={send}><Send size={16} /> {sending ? "Enviando..." : "Enviar por correo"}</button><button className="secondary" onClick={() => window.print()}><Printer size={16} /> Imprimir / PDF</button></div></div>
+    {error && <p className="form-error">{error}</p>}
     <article className="invoice-document">
       <header className="invoice-brand">
-        <div className="invoice-logo">WI</div>
-        <div><strong>Wild Incas</strong><span>Backpackers Hostal</span><small>Cuenca, Ecuador</small></div>
-        <div className="invoice-identity"><small>COMPROBANTE DE HOSPEDAJE</small><b>{invoice.number}</b><Status status={invoice.paymentStatus} /></div>
+        <div className="invoice-logo"><Building2 size={21} /><span>WI</span></div>
+        <div className="invoice-hotel"><strong>Wild Incas</strong><span>Backpackers Hostal</span><small>Cuenca, Ecuador / Gestion hotelera</small></div>
+        <div className="invoice-identity"><small>FACTURA DE HOSPEDAJE</small><b>{invoice.number}</b><Status status={invoice.paymentStatus} /></div>
       </header>
       <section className="invoice-meta">
         <div><small>Fecha de emision</small><b>{dateText(invoice.issuedAt, true)}</b></div>
         <div><small>Reserva</small><b>{invoice.reservationCode || "-"}</b></div>
-        <div><small>Habitacion</small><b>Hab. {invoice.roomId}</b></div>
+        <div><small>Habitacion</small><b>Hab. {invoice.roomId} / {invoice.roomType || "Hospedaje"}</b></div>
         <div><small>Estadia</small><b>{dateText(invoice.checkIn)} al {dateText(invoice.checkOut)}</b></div>
       </section>
       <section className="invoice-customer">
-        <div><small>Huesped / cliente</small><b>{invoice.guest?.name || "Consumidor final"}</b><span>{invoice.guest?.documentType || "Documento"}: {invoice.guest?.documentNumber || "No registrado"}</span></div>
-        <div><small>Contacto</small><b>{invoice.guest?.email || "Correo no registrado"}</b><span>{invoice.guest?.phone || "Telefono no registrado"}</span><span>{invoice.guest?.address || "Direccion no registrada"}</span></div>
+        <div><small>Huesped / cliente</small><b>{invoice.guest?.name || "Consumidor final"}</b><span>{invoice.guest?.documentType || "Documento"}: {invoice.guest?.documentNumber || "No registrado"}</span><span>{invoice.guest?.address || "Direccion no registrada"}</span></div>
+        <div><small>Contacto y entrega</small><b>{invoice.guest?.email || "Correo no registrado"}</b><span>{invoice.guest?.phone || "Telefono no registrado"}</span><span className={`delivery-line ${delivery?.status || "not_sent"}`}>{delivery?.status === "sent" ? "Correo entregado al proveedor" : delivery ? labels[delivery.status] || delivery.status : "Correo pendiente de envio"}</span></div>
       </section>
       <div className="invoice-detail-title"><span>Detalle facturado</span><small>Valores expresados en USD</small></div>
       <LineItems lines={invoice.lines || []} />
       <section className="invoice-closing">
-        <div className="invoice-notes"><small>Observaciones</small><p>{invoice.notes || "Servicio de hospedaje registrado por Wild Incas."}</p><span>Documento interno de control. No sustituye un comprobante tributario autorizado por el SRI.</span></div>
+        <div className="invoice-notes"><small>Informacion del servicio</small><p>{invoice.notes || "Servicio de hospedaje registrado por Wild Incas."}</p><dl><div><dt>Noches</dt><dd>{invoice.nights || "-"}</dd></div><div><dt>Emitido por</dt><dd>{invoice.issuedBy || "Recepcion"}</dd></div><div><dt>Moneda</dt><dd>{invoice.currency || "USD"}</dd></div></dl><span>Documento comercial interno para control de la estadia. No sustituye un comprobante tributario autorizado por el SRI.</span></div>
         <div className="totals"><span>Subtotal <b>{money(invoice.subtotal)}</b></span><span>Impuestos <b>{money(invoice.tax)}</b></span><span className="grand">Total <b>{money(invoice.total)}</b></span><span>Pagado <b>{money(invoice.paid)}</b></span><span className={invoice.balance > 0 ? "balance due" : "balance"}>Saldo <b>{money(invoice.balance)}</b></span></div>
       </section>
-      <section className="invoice-payments"><h4>Pagos registrados</h4><PaymentList items={payments} /></section>
-      <footer><span>Gracias por hospedarte en Wild Incas.</span><small>Generado por SIMOT · {invoice.number} · {dateText(invoice.issuedAt, true)}</small></footer>
+      <section className="invoice-payments"><div className="invoice-section-heading"><h4>Pagos registrados</h4><span>{activePayments.length} movimiento(s) valido(s)</span></div><div className="invoice-payment-ledger">{payments.length ? payments.map((item) => <div key={item.id} className={item.status === "voided" ? "voided" : ""}><span><CreditCard size={16} /><b>{item.method}</b><small>{dateText(item.createdAt, true)}{item.reference ? ` / ${item.reference}` : ""}{item.voidReason ? ` / Anulado: ${item.voidReason}` : ""}</small></span><strong>{money(item.amount)}</strong>{item.status !== "voided" && onVoid && <IconButton danger title="Anular pago" onClick={() => onVoid(item)}><X size={15} /></IconButton>}</div>) : <Empty icon={CreditCard} text="No hay pagos registrados" />}</div></section>
+      <footer><span>Gracias por hospedarte en Wild Incas.</span><small>Generado por SIMOT / {invoice.number} / {dateText(invoice.issuedAt, true)}</small></footer>
     </article>
   </Modal>;
 }
@@ -560,7 +646,7 @@ function Empty({ icon: Icon, text }) { return <div className="empty-state"><Icon
 function MiniKpi({ title, value, detail }) { return <article className="kpi mini"><small>{title}</small><strong>{value}</strong>{detail && <p>{detail}</p>}</article>; }
 function Info({ label, children }) { return <div className="info"><small>{label}</small><b>{children}</b></div>; }
 function StatusFilters({ values, active, onChange }) { return <div className="status-filters">{values.map((value) => <button key={value} className={active === value ? "active" : ""} onClick={() => onChange(value)}>{labels[value] || value}</button>)}</div>; }
-function paymentTotal(payments, reservationId) { return Number(payments.filter((item) => item.reservationId === reservationId).reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2)); }
+function paymentTotal(payments, reservationId) { return Number(payments.filter((item) => item.status !== "voided" && item.reservationId === reservationId).reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2)); }
 function eventLabel(type) { return ({ "reservation-confirmed": "Reserva confirmada", "reservation-modified": "Reserva actualizada", "reservation-cancelled": "Reserva cancelada", "check-in": "Comprobante de check-in", "payment-confirmation": "Confirmacion de pago", "invoice-finalized": "Factura final", "employee-welcome": "Acceso de empleado", test: "Prueba de correo" })[type] || type; }
 function RoomCompact({ room }) { return <div className={`room-compact ${room.status}`}><span><b>{room.id}</b><small>{room.type}</small></span><Status status={room.status} /></div>; }
 function RoomLegend() { return <div className="legend">{["available", "occupied", "cleaning", "maintenance", "out_of_service"].map((status) => <span key={status}><i className={status} />{labels[status]}</span>)}</div>; }

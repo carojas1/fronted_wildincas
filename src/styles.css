@@ -156,6 +156,34 @@ main { min-width: 0; padding: 28px 34px 56px; }
 .invoice-total { display: flex; justify-content: flex-end; align-items: center; gap: 22px; font-size: 12px; }.invoice-total strong { font-size: 23px; color: var(--green); }.invoice-heading { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }.invoice-heading > div { display: grid; gap: 3px; }.invoice-heading small { color: var(--muted); font-size: 9px; }.invoice-heading b { font-size: 14px; }.invoice-heading span { color: #52615c; font-size: 10px; }.totals { margin-left: auto; width: min(340px, 100%); display: grid; gap: 7px; }.totals span { display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding: 7px 0; font-size: 11px; }.totals .grand { border-bottom: 2px solid #173f37; font-size: 17px; color: var(--green); }.totals .balance { border: 0; font-weight: 800; }.totals .balance.due { color: var(--red); }
 .invoice-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--muted); font-size: 10px; }.invoice-document { border: 1px solid #cfdad5; background: #fff; color: #1e2e29; }.invoice-brand { display: grid; grid-template-columns: 50px 1fr auto; gap: 13px; align-items: center; padding: 22px 24px; border-bottom: 4px solid #d2b66f; background: #173f37; color: white; }.invoice-logo { width: 48px; height: 48px; display: grid; place-items: center; background: #d8bd78; color: #173f37; border-radius: 4px; font: 800 18px Georgia,serif; }.invoice-brand > div:nth-child(2) { display: grid; }.invoice-brand strong { font: 700 23px Georgia,serif; }.invoice-brand span { color: #dce8e3; font-size: 10px; text-transform: uppercase; }.invoice-brand small { color: #aec6be; font-size: 9px; }.invoice-identity { display: grid; justify-items: end; gap: 5px; text-align: right; }.invoice-identity small { color: #d8bd78; font-weight: 800; }.invoice-identity b { font-size: 17px; letter-spacing: 0; }.invoice-meta { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); background: #edf3f0; border-bottom: 1px solid #d6e0dc; }.invoice-meta > div { padding: 13px 16px; border-left: 1px solid #d6e0dc; }.invoice-meta > div:first-child { border-left: 0; }.invoice-meta small,.invoice-meta b { display: block; }.invoice-meta small,.invoice-customer small,.invoice-notes small { color: #6b7a74; font-size: 8px; font-weight: 800; text-transform: uppercase; }.invoice-meta b { margin-top: 4px; font-size: 10px; }.invoice-customer { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; padding: 20px 24px; }.invoice-customer > div { display: grid; gap: 3px; }.invoice-customer b { margin: 3px 0; font-size: 13px; }.invoice-customer span { color: #596761; font-size: 9px; }.invoice-detail-title { display: flex; justify-content: space-between; align-items: end; margin: 0 24px 8px; }.invoice-detail-title span { font-size: 10px; font-weight: 800; text-transform: uppercase; }.invoice-detail-title small { color: var(--muted); font-size: 8px; }.invoice-document > .line-items { margin: 0 24px; border-radius: 2px; }.invoice-closing { display: grid; grid-template-columns: minmax(0,1fr) minmax(240px,320px); gap: 32px; padding: 20px 24px; }.invoice-notes p { color: #43534d; font-size: 10px; line-height: 1.5; }.invoice-notes span { display: block; margin-top: 16px; color: #7f8a86; font-size: 8px; line-height: 1.45; }.invoice-payments { margin: 0 24px; padding: 16px 0; border-top: 1px solid #d7e0dc; }.invoice-payments h4 { margin-bottom: 5px; }.invoice-document > footer { display: flex; justify-content: space-between; gap: 15px; padding: 14px 24px; background: #edf3f0; color: #466158; font-size: 9px; }.invoice-document > footer small { color: #75827d; }
 .payment-list > div { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }.payment-list > div:first-child { border-top: 0; }.payment-list > div > span { display: grid; grid-template-columns: 20px 1fr; align-items: center; column-gap: 6px; }.payment-list small { grid-column: 2; color: var(--muted); font-size: 9px; }.payment-list b { font-size: 11px; }.payment-list strong { color: #277152; }
+.modal.invoice { width: min(1060px, 98vw); padding: 24px; background: #f7f9f8; }
+.modal.invoice > header { top: -24px; margin: -24px -24px 0; padding: 18px 24px 14px; }
+.invoice-toolbar-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.invoice-assurance { display: inline-flex; align-items: center; gap: 7px; color: #2f6958; font-weight: 750; font-size: 12px; }
+.invoice-document { box-shadow: 0 15px 45px rgba(27, 55, 46, .09); }
+.invoice-logo { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+.invoice-logo span { color: #173f37; font-size: 11px; font-family: Inter, sans-serif; font-weight: 900; line-height: 1; }
+.invoice-hotel { display: grid; gap: 2px; }
+.delivery-line { width: fit-content; margin-top: 5px; border-radius: 4px; padding: 4px 7px; background: #f5eedf; color: #80601f !important; font-weight: 750; }
+.delivery-line.sent { background: #e1f0e8; color: #276349 !important; }
+.invoice-notes dl { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 14px 0 0; }
+.invoice-notes dl div { min-width: 90px; }
+.invoice-notes dt { color: #7a8782; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.invoice-notes dd { margin: 4px 0 0; color: #263b34; font-size: 10px; font-weight: 750; }
+.invoice-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 5px; }
+.invoice-section-heading span { color: var(--muted); font-size: 9px; }
+.invoice-payment-ledger > div { display: grid; grid-template-columns: minmax(0, 1fr) auto 34px; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.invoice-payment-ledger > div:first-child { border-top: 0; }
+.invoice-payment-ledger > div > span { display: grid; grid-template-columns: 20px 1fr; align-items: center; column-gap: 7px; }
+.invoice-payment-ledger b { font-size: 11px; }
+.invoice-payment-ledger small { grid-column: 2; color: var(--muted); font-size: 9px; }
+.invoice-payment-ledger strong { color: #277152; font-size: 12px; }
+.invoice-payment-ledger .voided { opacity: .58; text-decoration: line-through; }
+.invoice-payment-ledger .voided strong { color: var(--red); }
+.billing-kpis .kpi { border-top: 3px solid #315f82; }
+.billing-kpis .kpi:nth-child(2) { border-top-color: #2f7563; }
+.billing-kpis .kpi:nth-child(3) { border-top-color: #a54a4a; }
+.billing-kpis .kpi:nth-child(4) { border-top-color: #a27628; }
 .history-list { display: grid; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .history-list article { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(150px, .8fr) auto; gap: 14px; align-items: center; padding: 13px; border-top: 1px solid var(--line); }
 .history-list article:first-child { border-top: 0; }.history-list b, .history-list small { display: block; }.history-list b { font-size: 11px; }.history-list small { color: var(--muted); font-size: 9px; margin-top: 3px; }
@@ -169,6 +197,10 @@ main { min-width: 0; padding: 28px 34px 56px; }
 .login-brand p { color: #d1b879; font-size: 11px; font-weight: 800; text-transform: uppercase; }.login-brand h1 { font-family: Georgia, "Times New Roman", serif; font-size: clamp(56px, 7vw, 94px); margin: 8px 0 10px; line-height: .95; }.login-brand h2 { max-width: 620px; margin: 0; color: #bdd0ca; font-size: clamp(18px, 2vw, 27px); font-weight: 450; line-height: 1.35; }
 .login-brand footer { display: flex; gap: 12px; flex-wrap: wrap; border-top: 1px solid #34564f; padding-top: 18px; }.login-brand footer span { border: 1px solid #3c6158; border-radius: 5px; padding: 7px 10px; color: #a9c0b9; font-size: 10px; }
 .login-panel { width: min(440px, 84vw); margin: auto; display: grid; gap: 16px; }.login-icon { width: 44px; height: 44px; display: grid; place-items: center; background: #e5efeb; color: var(--green); border-radius: 7px; }.login-panel > p { margin: 3px 0 -10px; color: #7c8a85; font-size: 10px; font-weight: 800; }.login-panel h2 { margin: 0 0 8px; font-size: 32px; }
+.login-connection { display: flex; align-items: center; gap: 8px; color: #65736e; font-size: 11px; }
+.login-connection i { width: 8px; height: 8px; border-radius: 50%; background: #5fac81; box-shadow: 0 0 0 4px #e3f0e9; }
+.login-connection.warming i { background: #c0933d; box-shadow: 0 0 0 4px #f6efdf; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .45; } }
 
 @media (max-width: 1150px) {
   .app-shell { grid-template-columns: 82px minmax(0, 1fr); }
@@ -196,5 +228,5 @@ main { min-width: 0; padding: 28px 34px 56px; }
 }
 
 @media (max-width: 700px) {
-  .invoice-toolbar { align-items: stretch; flex-direction: column; }.invoice-meta { grid-template-columns: repeat(2,minmax(0,1fr)); }.invoice-meta > div:nth-child(3) { border-left: 0; border-top: 1px solid #d6e0dc; }.invoice-meta > div:nth-child(4) { border-top: 1px solid #d6e0dc; }.invoice-customer,.invoice-closing { grid-template-columns: 1fr; }.invoice-brand { grid-template-columns: 42px 1fr; }.invoice-logo { width: 40px; height: 40px; }.invoice-identity { grid-column: 1/-1; align-items: center; grid-template-columns: 1fr auto; justify-items: start; text-align: left; }.invoice-identity .status { justify-self: end; }.invoice-document > footer { flex-direction: column; }
+  .invoice-toolbar { align-items: stretch; flex-direction: column; }.invoice-toolbar-actions { display: grid; grid-template-columns: 1fr 1fr; }.invoice-meta { grid-template-columns: repeat(2,minmax(0,1fr)); }.invoice-meta > div:nth-child(3) { border-left: 0; border-top: 1px solid #d6e0dc; }.invoice-meta > div:nth-child(4) { border-top: 1px solid #d6e0dc; }.invoice-customer,.invoice-closing { grid-template-columns: 1fr; }.invoice-brand { grid-template-columns: 42px 1fr; }.invoice-logo { width: 40px; height: 40px; }.invoice-identity { grid-column: 1/-1; align-items: center; grid-template-columns: 1fr auto; justify-items: start; text-align: left; }.invoice-identity .status { justify-self: end; }.invoice-document > footer { flex-direction: column; }
 }
