@@ -92,6 +92,7 @@ const labels = {
   inactive: "Inactivo",
   overdue: "Salida vencida",
   overpaid: "Sobrepago",
+  balance_due: "Por cobrar",
   voided: "Anulado",
   all: "Todos"
 };
@@ -208,6 +209,7 @@ async function requestSource(path) {
 function App() {
   const [session, setSession] = useState(sessionValue);
   const [view, setView] = useState("dashboard");
+  const [viewIntent, setViewIntent] = useState(null);
   const [data, setData] = useState(emptyData);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
@@ -286,11 +288,16 @@ function App() {
   const active = visibleNav.some((item) => item.id === view) ? view : visibleNav[0]?.id || "dashboard";
   const title = nav.find((item) => item.id === active)?.label || "Dashboard";
   const reload = () => loadView(active);
-  const common = { data, reload, notify, session };
+  function navigate(target, intent = null) {
+    setViewIntent(intent ? { type: intent, key: Date.now() } : null);
+    setView(target);
+  }
+  const common = { data, reload, notify, session, navigate, viewIntent, clearViewIntent: () => setViewIntent(null) };
+  const canCreateStay = modules.includes("all") || modules.includes("reservations");
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="brand"><img src="/wild-incas-brand.png" alt="Wild Incas" /><small>Hotel management</small></div>
+      <div className="brand"><img src="/wild-incas-brand.png" alt="Wild Incas" /><small>Gestion hotelera</small></div>
       <div className="system-state"><i /> Operacion conectada</div>
       <nav>{[...new Set(visibleNav.map((item) => item.group))].map((group) => <div className="nav-section" key={group}>
         <p>{group}</p>{visibleNav.filter((item) => item.group === group).map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => setView(item.id)} title={item.label}>
@@ -299,8 +306,8 @@ function App() {
       <div className="profile"><Avatar name={session.user.name} /><span><b>{session.user.name}</b><small>{session.user.role}</small></span><button title="Cerrar sesion" onClick={() => { localStorage.removeItem("simot-session"); setSession(null); }}><LogOut size={17} /></button></div>
     </aside>
     <main>
-      <header className="page-header"><div><p>{nav.find((item) => item.id === active)?.group}</p><h1>{title}</h1></div><button className="secondary" onClick={reload} disabled={loading}><RefreshCw size={16} className={loading ? "spin" : ""} /> Actualizar</button></header>
-      {active === "dashboard" && <Dashboard {...common} setView={setView} />}
+      <header className="page-header"><div><p>{nav.find((item) => item.id === active)?.group}</p><h1>{title}</h1></div><div className="page-actions">{canCreateStay && active !== "reservations" && <button className="primary" onClick={() => navigate("reservations", "new-stay")}><Plus size={16} /> Nueva estadia</button>}<button className="secondary" onClick={reload} disabled={loading}><RefreshCw size={16} className={loading ? "spin" : ""} /> Actualizar</button></div></header>
+      {active === "dashboard" && <Dashboard {...common} />}
       {active === "reservations" && <Reservations {...common} />}
       {active === "guests" && <Guests {...common} />}
       {active === "rooms" && <Rooms {...common} />}
@@ -347,7 +354,7 @@ function Login({ onLogin }) {
   </div>;
 }
 
-function Dashboard({ data, setView, notify, session }) {
+function Dashboard({ data, navigate, notify, session }) {
   const [attendance, setAttendance] = useState(null);
   const [attendanceBusy, setAttendanceBusy] = useState(false);
   useEffect(() => {
@@ -370,6 +377,14 @@ function Dashboard({ data, setView, notify, session }) {
   const occupied = data.dashboard.occupiedRoomIds?.length || 0;
   const occupancy = data.rooms.length ? Math.round((occupied / data.rooms.length) * 100) : 0;
   const recentMovements = data.movements.filter((item) => item.status !== "voided").slice(0, 8);
+  const pendingCleaning = data.rooms.filter((room) => room.status === "cleaning").length;
+  const pendingDepartures = data.dashboard.departures?.length || 0;
+  const quickActions = [
+    { title: "Nueva estadia", detail: "Registrar huesped, fechas y habitacion", icon: CalendarCheck, target: "reservations", intent: "new-stay", primary: true },
+    { title: "Cobros pendientes", detail: money(data.metrics.accountsReceivable), icon: CreditCard, target: "reservations", intent: "balance-due", attention: Number(data.metrics.accountsReceivable || 0) > 0 },
+    { title: "Salidas por cerrar", detail: `${pendingDepartures} pendiente(s)`, icon: LogOut, target: "reservations", intent: "overdue", attention: pendingDepartures > 0 },
+    { title: "Habitaciones en limpieza", detail: `${pendingCleaning} pendiente(s)`, icon: Sparkles, target: "cleaning", attention: pendingCleaning > 0 }
+  ];
   const cards = [
     ["Ocupacion actual", `${occupancy}%`, `${occupied} de ${data.rooms.length} habitaciones`, BedDouble],
     ["Cobros confirmados", money(data.metrics.collected), "Pagos efectivos registrados", TrendingUp],
@@ -379,24 +394,36 @@ function Dashboard({ data, setView, notify, session }) {
   return <div className="dashboard-stack">
     <section className="welcome-strip"><div><small>{greetingLabel()}</small><h2>Bienvenido, {session.user.name}</h2><p>{welcomeMessage(session.user.role)}</p></div>{attendance?.employee && <div className="attendance-control"><span><i className={attendance.active ? "active" : ""} /><b>{attendance.active ? `En jornada desde ${timeText(attendance.active.startedAt)}` : "Jornada sin iniciar"}</b></span><button className={attendance.active ? "secondary" : "primary"} disabled={attendanceBusy} onClick={toggleAttendance}>{attendance.active ? <LogOut size={16} /> : <LogIn size={16} />}{attendanceBusy ? "Guardando..." : attendance.active ? "Marcar salida" : "Marcar entrada"}</button></div>}</section>
     <section className="kpi-grid">{cards.map(([title, value, detail, Icon]) => <article className="kpi" key={title}><span><Icon size={18} /></span><small>{title}</small><strong>{value}</strong><p>{detail}</p></article>)}</section>
+    <section className="reception-center" aria-label="Acciones rapidas de recepcion"><div className="reception-copy"><small>RECEPCION</small><h3>Que necesitas hacer ahora?</h3><p>Accesos directos al flujo diario del hotel.</p></div><div className="quick-actions">{quickActions.map((action) => <button key={action.title} className={`${action.primary ? "primary-action" : ""} ${action.attention ? "attention" : ""}`} onClick={() => navigate(action.target, action.intent)}><span><action.icon size={18} /></span><b>{action.title}</b><small>{action.detail}</small><ChevronRight size={17} /></button>)}</div></section>
     <section className="dashboard-grid">
-      <article className="panel room-board"><PanelHeader title="Estado de habitaciones" action="Ver habitaciones" onClick={() => setView("rooms")} /><div className="room-map">{data.rooms.map((room) => <RoomCompact key={room.id} room={room} />)}</div><RoomLegend /></article>
+      <article className="panel room-board"><PanelHeader title="Estado de habitaciones" action="Ver habitaciones" onClick={() => navigate("rooms")} /><div className="room-map">{data.rooms.map((room) => <RoomCompact key={room.id} room={room} />)}</div><RoomLegend /></article>
       <article className="panel today"><PanelHeader title="Agenda de hoy" />
         <AgendaBlock title="Llegadas" items={data.dashboard.arrivals} empty="Sin llegadas programadas" />
         <AgendaBlock title="Salidas" items={data.dashboard.departures} empty="Sin salidas pendientes" />
       </article>
-      <article className="panel span-2"><PanelHeader title="Actividad financiera reciente" action="Abrir contabilidad" onClick={() => setView("income")} /><MovementList items={recentMovements} /></article>
+      <article className="panel span-2"><PanelHeader title="Actividad financiera reciente" action="Abrir contabilidad" onClick={() => navigate("income")} /><MovementList items={recentMovements} /></article>
     </section>
   </div>;
 }
 
-function Reservations({ data, reload, notify, session }) {
+function Reservations({ data, reload, notify, session, viewIntent, clearViewIntent }) {
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState(null);
+  useEffect(() => {
+    if (!viewIntent) return;
+    if (viewIntent.type === "new-stay") setModal({ type: "create" });
+    if (viewIntent.type === "balance-due") setFilter("balance_due");
+    if (viewIntent.type === "overdue") setFilter("overdue");
+    clearViewIntent();
+  }, [viewIntent?.key]);
   const overdueCount = data.reservations.filter(isOverdueStay).length;
   const rows = data.reservations.filter((item) => {
-    const statusMatches = filter === "all" || (filter === "overdue" ? isOverdueStay(item) : item.status === filter);
+    const account = paymentSummary(data.payments, item.id, item.total);
+    const statusMatches = filter === "all"
+      || (filter === "overdue" ? isOverdueStay(item) : null)
+      || (filter === "balance_due" ? account.balance > 0 && ["confirmed", "checked_in"].includes(item.status) : null)
+      || item.status === filter;
     const queryMatches = [item.code, item.guest?.name, item.guest?.documentNumber, item.roomId]
       .some((value) => String(value || "").toLowerCase().includes(query.toLowerCase()));
     return statusMatches && queryMatches;
@@ -443,7 +470,7 @@ function Reservations({ data, reload, notify, session }) {
     notify("Reserva actualizada"); setModal(null); reload();
   }
   return <>
-    <div className="toolbar"><div className="search"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Reserva, huesped, documento o habitacion" /></div><StatusFilters values={["all", "overdue", "confirmed", "checked_in", "checked_out", "cancelled"]} active={filter} onChange={setFilter} />{overdueCount > 0 && <div className="counter attention"><AlertTriangle size={15} /> {overdueCount} salida(s) por cerrar</div>}<button className="primary" onClick={() => setModal({ type: "create" })}><Plus size={17} /> Nueva estadia</button></div>
+    <div className="toolbar"><div className="search"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Reserva, huesped, documento o habitacion" /></div><StatusFilters values={["all", "balance_due", "overdue", "confirmed", "checked_in", "checked_out", "cancelled"]} active={filter} onChange={setFilter} />{overdueCount > 0 && <div className="counter attention"><AlertTriangle size={15} /> {overdueCount} salida(s) por cerrar</div>}<button className="primary" onClick={() => setModal({ type: "create" })}><Plus size={17} /> Nueva estadia</button></div>
     <div className="data-table reservation-table"><div className="table-row table-head"><span>RESERVA / HUESPED</span><span>HABITACION</span><span>ESTADIA</span><span>TOTAL</span><span>ESTADO</span><span>ACCIONES</span></div>
       {rows.map((item) => {
         const account = paymentSummary(data.payments, item.id, item.total);
