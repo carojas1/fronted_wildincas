@@ -3,12 +3,14 @@ import { createRoot } from "react-dom/client";
 import {
   AlertTriangle,
   BadgeDollarSign,
+  BarChart3,
   BedDouble,
   BellRing,
   BookOpenCheck,
   BriefcaseBusiness,
   Building2,
   CalendarCheck,
+  CalendarDays,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -33,6 +35,7 @@ import {
   Sparkles,
   TrendingUp,
   UserCog,
+  UserPlus,
   Users,
   WalletCards,
   X
@@ -53,6 +56,11 @@ const nav = [
   { id: "income", label: "Contabilidad", hint: "Ingresos, gastos y Excel", icon: BadgeDollarSign, group: "FINANZAS" },
   { id: "employees", label: "Empleados", hint: "Personal y turnos", icon: BriefcaseBusiness, group: "ADMINISTRACION" },
   { id: "users", label: "Accesos", hint: "Roles y permisos", icon: UserCog, group: "ADMINISTRACION" }
+];
+
+const permissionOptions = [
+  ...nav.map(({ id, label }) => ({ id, label })),
+  { id: "notifications", label: "Correo y comprobantes" }
 ];
 
 const labels = {
@@ -89,19 +97,19 @@ const labels = {
 const emptyData = {
   rooms: [], reservations: [], guests: [], movements: [], incidents: [], checklist: [], employees: [],
   invoices: [], payments: [], notifications: [], dashboard: {}, summary: {}, metrics: {}, daily: {}, shifts: {},
-  users: [], roles: [], currentShift: null, emailConfig: {}
+  users: [], roles: [], currentShift: null, emailConfig: {}, analytics: null
 };
 
 const viewSources = {
   dashboard: [["rooms", "/rooms", []], ["dashboard", "/reservations/dashboard", {}], ["metrics", "/finance/metrics", {}], ["movements", "/finance/movements", []]],
   reservations: [["rooms", "/rooms", []], ["reservations", "/reservations/reservations", []], ["guests", "/reservations/guests", []], ["payments", "/finance/payments", []]],
-  guests: [["guests", "/reservations/guests", []], ["reservations", "/reservations/reservations", []], ["payments", "/finance/payments", []], ["invoices", "/finance/invoices", []]],
+  guests: [["guests", "/reservations/guests", []], ["reservations", "/reservations/reservations", []], ["payments", "/finance/payments", []], ["invoices", "/finance/invoices", []], ["rooms", "/rooms", []]],
   rooms: [["rooms", "/rooms", []]],
   cleaning: [["rooms", "/rooms", []], ["incidents", "/operations/incidents", []]],
   logbook: [["incidents", "/operations/incidents", []], ["rooms", "/rooms", []]],
   billing: [["invoices", "/finance/invoices", []], ["payments", "/finance/payments", []], ["reservations", "/reservations/reservations", []], ["notifications", "/notifications/events", []], ["emailConfig", "/notifications/config", {}]],
   cash: [["daily", "/finance/daily", {}], ["shifts", "/finance/shifts", {}], ["checklist", "/operations/checklist", []]],
-  income: [["summary", "/finance/summary", {}], ["movements", "/finance/movements", []], ["payments", "/finance/payments", []]],
+  income: [["summary", "/finance/summary", {}], ["movements", "/finance/movements", []], ["payments", "/finance/payments", []], ["invoices", "/finance/invoices", []]],
   employees: [["employees", "/employees", []], ["currentShift", "/employees/current-shift", null], ["roles", "/auth/roles", []], ["users", "/auth/users", []]],
   users: [["users", "/auth/users", []], ["roles", "/auth/roles", []], ["emailConfig", "/notifications/config", {}]]
 };
@@ -223,7 +231,7 @@ function App() {
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="brand"><span>WI</span><div><strong>Wild Incas</strong><small>Hotel management</small></div></div>
+      <div className="brand"><img src="/wild-incas-brand.png" alt="Wild Incas" /><small>Hotel management</small></div>
       <div className="system-state"><i /> Operacion conectada</div>
       <nav>{[...new Set(visibleNav.map((item) => item.group))].map((group) => <div className="nav-section" key={group}>
         <p>{group}</p>{visibleNav.filter((item) => item.group === group).map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => setView(item.id)} title={item.label}>
@@ -269,7 +277,7 @@ function Login({ onLogin }) {
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
   return <div className="login-page">
-    <section className="login-brand"><div className="brand-mark">WI</div><div><p>Cuenca, Ecuador</p><h1>Wild Incas</h1><h2>Gestion hotelera, reservas y contabilidad en una sola operacion.</h2></div><footer><span>API Gateway</span><span>Microservicios</span><span>Supabase</span></footer></section>
+    <section className="login-brand"><div><p>Cuenca, Ecuador</p><img className="login-wordmark" src="/wild-incas-brand.png" alt="Wild Incas" /><h2>Reservas, habitaciones, caja y contabilidad en una sola operacion.</h2></div><footer><span>Operacion hotelera</span><span>Acceso por roles</span><span>Datos protegidos</span></footer></section>
     <form className="login-panel" onSubmit={submit}><div className="login-icon"><ShieldCheck size={22} /></div><p>ACCESO AL SISTEMA</p><h2>Bienvenido</h2>
       <Field label="Usuario" value={values.username} onChange={(username) => setValues({ ...values, username })} autoComplete="username" />
       <Field label="Contrasena" type="password" value={values.password} onChange={(password) => setValues({ ...values, password })} autoComplete="current-password" />
@@ -335,9 +343,17 @@ function Reservations({ data, reload, notify, session }) {
     await request(`/reservations/reservations/${item.id}/charges`, { method: "POST", body: JSON.stringify({ ...values, actor: session.user.name }) });
     notify("Consumo agregado a la estadia"); setModal(null); reload();
   }
-  async function addPayment(item, values) {
+  async function addPayment(item, values, finishStay = false) {
+    const account = paymentSummary(data.payments, item.id, item.total);
+    if (finishStay && Number(values.amount || 0) < account.balance) throw new Error(`Para marcar la salida debes cobrar el saldo completo de ${money(account.balance)}`);
     const result = await request(`/reservations/reservations/${item.id}/payments`, { method: "POST", body: JSON.stringify({ ...values, actor: session.user.name }) });
-    notify(`Pago registrado. Cambio: ${money(result.payment.change)}. ${result.notification?.status === "sent" ? "Correo enviado." : "Correo en cola."}`); setModal(null); reload();
+    if (finishStay) {
+      const checkoutResult = await request(`/reservations/reservations/${item.id}/checkout`, { method: "POST", body: JSON.stringify({ actor: session.user.name }) });
+      notify(`Pago y salida registrados. Factura ${checkoutResult.invoice.number}. Cambio: ${money(result.payment.change)}`);
+    } else {
+      notify(`Pago registrado. Cambio: ${money(result.payment.change)}. ${result.notification?.status === "sent" ? "Correo enviado." : "Correo en cola."}`);
+    }
+    setModal(null); reload();
   }
   async function checkout(item) {
     if (!window.confirm(`Finalizar estadia ${item.code} y emitir factura definitiva?`)) return;
@@ -361,7 +377,8 @@ function Reservations({ data, reload, notify, session }) {
         {item.status === "confirmed" && <IconButton title="Check-in" onClick={() => checkIn(item)}><LogIn size={16} /></IconButton>}
         {item.status === "checked_in" && <IconButton title="Agregar cargo o servicio" onClick={() => setModal({ type: "charge", item })}><Plus size={16} /></IconButton>}
         {["confirmed", "checked_in", "checked_out"].includes(item.status) && paymentTotal(data.payments, item.id) < item.total && <IconButton title="Registrar pago" onClick={() => setModal({ type: "payment", item })}><CreditCard size={16} /></IconButton>}
-        {item.status === "checked_in" && <IconButton title="Checkout" onClick={() => checkout(item)}><LogOut size={16} /></IconButton>}
+        {item.status === "checked_in" && account.balance <= 0 && <button className="primary compact exit-action" onClick={() => checkout(item)}><LogOut size={15} /> Marcar salida</button>}
+        {item.status === "checked_in" && account.balance > 0 && <button className="secondary compact exit-action" onClick={() => setModal({ type: "payment-exit", item })}><CreditCard size={15} /> Cobrar y salir</button>}
         {item.status === "confirmed" && <IconButton title="Cancelar" danger onClick={() => cancel(item)}><X size={16} /></IconButton>}
       </span></div>;
       })}
@@ -371,31 +388,46 @@ function Reservations({ data, reload, notify, session }) {
     {modal?.type === "edit" && <ReservationModal reservation={modal.item} rooms={data.rooms} reservations={data.reservations} onClose={() => setModal(null)} onSubmit={(values) => update(modal.item, values)} />}
     {modal?.type === "charge" && <ChargeModal reservation={modal.item} onClose={() => setModal(null)} onSubmit={(values) => addCharge(modal.item, values)} />}
     {modal?.type === "payment" && <PaymentModal reservation={modal.item} payments={data.payments} onClose={() => setModal(null)} onSubmit={(values) => addPayment(modal.item, values)} />}
+    {modal?.type === "payment-exit" && <PaymentModal checkout reservation={modal.item} payments={data.payments} onClose={() => setModal(null)} onSubmit={(values) => addPayment(modal.item, values, true)} />}
     {modal?.type === "detail" && <ReservationDetail item={data.reservations.find((row) => row.id === modal.item.id) || modal.item} payments={data.payments} onClose={() => setModal(null)} />}
   </>;
 }
 
-function Guests({ data, reload, notify }) {
+function Guests({ data, reload, notify, session }) {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState(null);
   const [history, setHistory] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [newStay, setNewStay] = useState(null);
   const rows = data.guests.filter((item) => [item.name, item.documentNumber, item.email, item.phone].some((value) => String(value || "").toLowerCase().includes(query.toLowerCase())));
   async function update(values) {
     const result = await attempt(notify, () => request(`/reservations/guests/${values.id}`, { method: "PATCH", body: JSON.stringify(values) }));
     if (!result.ok) return;
     notify("Datos del huesped actualizados"); setEditing(null); reload();
   }
-  return <><div className="toolbar"><div className="search"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nombre, cedula, correo o telefono" /></div><div className="counter">{rows.length} huespedes</div></div>
+  async function createGuest(values) {
+    const result = await attempt(notify, () => request("/reservations/guests", { method: "POST", body: JSON.stringify({ ...values, actor: session.user.name }) }));
+    if (!result.ok) return;
+    notify("Huesped agregado al directorio"); setCreating(false); reload();
+  }
+  async function createStay(values) {
+    const result = await request("/reservations/reservations", { method: "POST", body: JSON.stringify({ ...values, actor: session.user.name }) });
+    notify(result.notification?.status === "sent" ? "Nueva estadia guardada y correo enviado" : "Nueva estadia guardada; correo en cola", result.notification?.status === "sent" ? "success" : "warning");
+    setNewStay(null); setHistory(null); reload();
+  }
+  return <><div className="toolbar"><div className="search"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nombre, cedula, correo o telefono" /></div><div className="button-row"><div className="counter">{rows.length} huespedes</div><button className="secondary" onClick={() => setCreating(true)}><UserPlus size={16} /> Nuevo huesped</button></div></div>
     <div className="guest-grid">{rows.map((guest) => {
       const stays = data.reservations.filter((item) => item.guestId === guest.id);
       return <article className="guest-card" key={guest.id}>
         <header><Avatar name={guest.name} /><span><b>{guest.name}</b><small>{guest.country || "Nacionalidad no registrada"}</small></span><IconButton title="Editar" onClick={() => setEditing(guest)}><Pencil size={15} /></IconButton></header>
         <dl><dt>Documento</dt><dd>{guest.documentType} {guest.documentNumber || "-"}</dd><dt>Correo</dt><dd>{guest.email || "-"}</dd><dt>Telefono</dt><dd>{guest.phone || "-"}</dd><dt>Direccion</dt><dd>{guest.address || "-"}</dd></dl>
-        <footer><button className="text-action" onClick={() => setHistory({ guest, stays })}><Eye size={15} /> Ver {stays.length} estadia(s)</button><Status status={stays.some((item) => item.status === "checked_in") ? "active" : "inactive"} /></footer>
+        <footer><button className="text-action" onClick={() => setHistory({ guest, stays })}><Eye size={15} /> Ver {stays.length} estadia(s)</button><button className="text-action" onClick={() => setNewStay(guest)}><Plus size={15} /> Nueva estadia</button><Status status={stays.some((item) => item.status === "checked_in") ? "active" : "inactive"} /></footer>
       </article>;
     })}</div>
     {editing && <GuestModal guest={editing} onClose={() => setEditing(null)} onSubmit={update} />}
-    {history && <GuestHistoryModal guest={history.guest} stays={history.stays} payments={data.payments} onClose={() => setHistory(null)} />}
+    {creating && <GuestModal onClose={() => setCreating(false)} onSubmit={createGuest} />}
+    {newStay && <ReservationModal initialGuest={newStay} rooms={data.rooms} reservations={data.reservations} onClose={() => setNewStay(null)} onSubmit={createStay} />}
+    {history && <GuestHistoryModal guest={history.guest} stays={history.stays} payments={data.payments} onNewStay={() => setNewStay(history.guest)} onClose={() => setHistory(null)} />}
   </>;
 }
 
@@ -507,19 +539,54 @@ function Cash({ data, reload, notify, session }) {
 
 function Accounting({ data, reload, notify }) {
   const [movement, setMovement] = useState(false);
-  async function add(payload) { const result = await attempt(notify, () => request("/finance/movements", { method: "POST", body: JSON.stringify(payload) })); if (!result.ok) return; notify("Movimiento contable registrado"); setMovement(false); reload(); }
+  const [reportVersion, setReportVersion] = useState(0);
+  const currentDate = new Date().toISOString().slice(0, 10);
+  const [period, setPeriod] = useState({ preset: "month", from: `${currentDate.slice(0, 7)}-01`, to: currentDate });
+  const [analytics, setAnalytics] = useState(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  async function add(payload) { const result = await attempt(notify, () => request("/finance/movements", { method: "POST", body: JSON.stringify(payload) })); if (!result.ok) return; notify("Movimiento contable registrado"); setMovement(false); setReportVersion((value) => value + 1); reload(); }
+  useEffect(() => {
+    let active = true;
+    setReportLoading(true);
+    request(`/finance/analytics?from=${period.from}&to=${period.to}`, { timeout: 30000 })
+      .then((result) => { if (active) setAnalytics(result); })
+      .catch((error) => { if (active) notify(error.message, "warning"); })
+      .finally(() => { if (active) setReportLoading(false); });
+    return () => { active = false; };
+  }, [period.from, period.to, reportVersion]);
+  function selectPreset(preset) {
+    const end = new Date(`${currentDate}T12:00:00`);
+    const start = new Date(end);
+    if (preset === "day") start.setDate(end.getDate());
+    if (preset === "week") start.setDate(end.getDate() - ((end.getDay() + 6) % 7));
+    if (preset === "month") start.setDate(1);
+    if (preset === "year") { start.setMonth(0); start.setDate(1); }
+    setPeriod({ preset, from: start.toISOString().slice(0, 10), to: currentDate });
+  }
   async function download() {
     const result = await attempt(notify, async () => {
-      const response = await fetch(`${API}/finance/export.xlsx`, { headers: { Authorization: `Bearer ${sessionValue().token}` } });
+      const response = await fetch(`${API}/finance/export.xlsx?from=${period.from}&to=${period.to}`, { headers: { Authorization: `Bearer ${sessionValue().token}` } });
       if (!response.ok) throw new Error("No se pudo generar el Excel");
       return response.blob();
     });
     if (!result.ok) return;
-    const url = URL.createObjectURL(result.value); const link = document.createElement("a"); link.href = url; link.download = `wild-incas-contabilidad-${new Date().toISOString().slice(0, 10)}.xlsx`; link.click(); URL.revokeObjectURL(url); notify("Excel contable generado");
+    const url = URL.createObjectURL(result.value); const link = document.createElement("a"); link.href = url; link.download = `wild-incas-${period.from}-${period.to}.xlsx`; link.click(); URL.revokeObjectURL(url); notify("Excel hotelero generado con el periodo seleccionado");
   }
-  const validMovements = data.movements.filter((item) => item.status !== "voided");
+  const summary = analytics?.summary || { income: data.summary.income, expense: data.summary.expense, profit: data.summary.balance, collected: 0, accountsReceivable: data.summary.accountsReceivable, reservations: 0, occupancy: 0, averageDailyRate: 0 };
+  const validMovements = data.movements.filter((item) => item.status !== "voided" && item.date >= period.from && item.date <= period.to);
   const voidedPayments = data.payments.filter((item) => item.status === "voided");
-  return <><div className="accounting-head"><section className="kpi-grid"><MiniKpi title="Ingresos" value={money(data.summary.income)} /><MiniKpi title="Gastos" value={money(data.summary.expense)} /><MiniKpi title="Utilidad" value={money(data.summary.balance)} /><MiniKpi title="Por cobrar" value={money(data.summary.accountsReceivable)} /></section><div className="button-row"><button className="secondary" onClick={download}><FileSpreadsheet size={17} /> Exportar Excel</button><button className="primary" onClick={() => setMovement(true)}><Plus size={17} /> Movimiento</button></div></div><section className="panel"><PanelHeader title="Libro de movimientos validos" /><MovementList items={validMovements} detailed /></section>{voidedPayments.length > 0 && <section className="panel audit-panel"><PanelHeader title="Correcciones auditadas" /><p>Los pagos anulados no afectan caja, ingresos ni exportaciones. Se conservan para trazabilidad.</p><PaymentList items={voidedPayments} /></section>}{movement && <MovementModal onClose={() => setMovement(false)} onSubmit={add} />}</>;
+  const maxSeries = Math.max(1, ...(analytics?.series || []).flatMap((item) => [item.income, item.expense]));
+  return <div className="accounting-dashboard">
+    <section className="report-toolbar"><div><h3>Periodo del informe</h3><p>Los indicadores, movimientos y el Excel usan exactamente estas fechas.</p></div><div className="period-presets">{[["day", "Dia"], ["week", "Semana"], ["month", "Mes"], ["year", "Ano"]].map(([id, label]) => <button key={id} className={period.preset === id ? "active" : ""} onClick={() => selectPreset(id)}>{label}</button>)}</div><div className="date-range"><Field label="Desde" type="date" value={period.from} onChange={(from) => setPeriod({ preset: "custom", from, to: period.to })} /><Field label="Hasta" type="date" value={period.to} onChange={(to) => setPeriod({ preset: "custom", from: period.from, to })} /></div><div className="button-row"><button className="secondary" disabled={reportLoading || period.to < period.from} onClick={download}><FileSpreadsheet size={17} /> Exportar Excel</button><button className="primary" onClick={() => setMovement(true)}><Plus size={17} /> Nuevo movimiento</button></div></section>
+    <section className="kpi-grid accounting-kpis"><MiniKpi title="Ingresos" value={money(summary.income)} detail={`${summary.reservations || 0} estadia(s)`} /><MiniKpi title="Gastos" value={money(summary.expense)} detail="Egresos validos" /><MiniKpi title="Utilidad" value={money(summary.profit)} detail="Ingresos menos gastos" /><MiniKpi title="Cobrado" value={money(summary.collected)} detail="Pagos confirmados" /><MiniKpi title="Ocupacion" value={`${Number(summary.occupancy || 0).toFixed(1)}%`} detail="Noches vendidas / capacidad" /><MiniKpi title="Tarifa promedio" value={money(summary.averageDailyRate)} detail="Promedio por noche" /></section>
+    <section className="accounting-visuals">
+      <article className="panel trend-panel"><PanelHeader title="Ingresos y gastos por periodo" />{reportLoading ? <div className="report-loading"><RefreshCw className="spin" size={20} /> Consolidando microservicios</div> : analytics?.series?.length ? <div className="bar-chart">{analytics.series.map((item) => <div className="bar-row" key={item.label}><b>{item.label}</b><div><span className="income-bar" style={{ width: `${Math.max(2, (item.income / maxSeries) * 100)}%` }} /><small>{money(item.income)}</small></div><div><span className="expense-bar" style={{ width: `${Math.max(2, (item.expense / maxSeries) * 100)}%` }} /><small>{money(item.expense)}</small></div></div>)}</div> : <Empty icon={BarChart3} text="No hay movimientos en este periodo" />}</article>
+      <article className="panel method-panel"><PanelHeader title="Cobros por metodo" />{analytics?.methods?.length ? analytics.methods.map((item) => <div className="method-row" key={item.method}><span><CreditCard size={16} /><b>{item.method}</b></span><strong>{money(item.amount)}</strong></div>) : <Empty icon={CreditCard} text="No hay cobros en el periodo" />}<div className="method-total"><span>Por cobrar en facturas del periodo</span><b>{money(summary.accountsReceivable)}</b></div></article>
+    </section>
+    <section className="panel"><PanelHeader title={`Libro de movimientos: ${dateText(period.from)} - ${dateText(period.to)}`} /><MovementList items={validMovements} detailed /></section>
+    {voidedPayments.length > 0 && <section className="panel audit-panel"><PanelHeader title="Correcciones auditadas" /><p>Los pagos anulados no afectan caja, ingresos ni exportaciones. Se conservan para trazabilidad.</p><PaymentList items={voidedPayments} /></section>}
+    {movement && <MovementModal onClose={() => setMovement(false)} onSubmit={add} />}
+  </div>;
 }
 
 function Employees({ data, reload, notify }) {
@@ -532,21 +599,21 @@ function Employees({ data, reload, notify }) {
     notify(result.value.notification?.status === "sent" ? "Empleado creado y acceso aceptado por Brevo" : "Empleado y acceso creados; correo en cola", result.value.notification?.status === "sent" ? "success" : "warning"); setCreating(false); reload();
   }
   async function update(values) { const result = await attempt(notify, () => request(`/employees/${values.id}`, { method: "PATCH", body: JSON.stringify(values) })); if (!result.ok) return; notify("Empleado y permisos de acceso actualizados"); setEditing(null); reload(); }
-  return <><div className="toolbar"><div className="shift-banner"><CalendarCheck size={19} /><span><small>Turno activo</small><b>{data.currentShift?.name || "Sin asignacion"} - {data.currentShift?.shift || ""}</b></span></div><button className="primary" onClick={() => setCreating(true)}><Plus size={17} /> Nuevo empleado</button></div><div className="employee-grid">{data.employees.map((item) => <article className="employee-card" key={item.id}><header><Avatar name={item.name} /><span><b>{item.name}</b><small>{item.role}</small></span><IconButton title="Editar" onClick={() => setEditing(item)}><Pencil size={15} /></IconButton></header><dl><dt>Turno</dt><dd>{item.shift} - {item.hours}</dd><dt>Telefono</dt><dd>{item.phone || "-"}</dd><dt>Correo</dt><dd>{item.email}</dd><dt>Usuario</dt><dd>{item.username}</dd></dl><div className="module-tags">{(item.modules || []).map((module) => <span key={module}>{module}</span>)}</div><footer><small>Desde {item.since}</small><Status status={item.status} /></footer></article>)}</div>{creating && <EmployeeModal roles={data.roles} onClose={() => setCreating(false)} onSubmit={create} />}{editing && <EmployeeModal employee={editing} roles={data.roles} onClose={() => setEditing(null)} onSubmit={update} />}</>;
+  return <><div className="toolbar"><div className="shift-banner"><CalendarCheck size={19} /><span><small>Turno activo</small><b>{data.currentShift?.name || "Sin asignacion"} - {data.currentShift?.shift || ""}</b></span></div><button className="primary" onClick={() => setCreating(true)}><UserPlus size={17} /> Nuevo empleado</button></div><div className="employee-grid">{data.employees.map((item) => <article className="employee-card" key={item.id}><header><Avatar name={item.name} /><span><b>{item.name}</b><small>{item.role}</small></span><IconButton title="Editar empleado y permisos" onClick={() => setEditing(item)}><Pencil size={15} /></IconButton></header><dl><dt>Turno</dt><dd>{item.shift} - {item.hours}</dd><dt>Telefono</dt><dd>{item.phone || "-"}</dd><dt>Correo</dt><dd>{item.email}</dd><dt>Usuario</dt><dd>{item.username}</dd></dl><div className="permission-summary"><ShieldCheck size={15} /><b>{(item.modules || []).includes("all") ? "Acceso total" : `${(item.modules || []).length} modulos asignados`}</b></div><div className="module-tags">{moduleNames(item.modules).map((module) => <span key={module}>{module}</span>)}</div><footer><small>Desde {item.since}</small><Status status={item.status} /></footer></article>)}</div>{creating && <EmployeeModal roles={data.roles} onClose={() => setCreating(false)} onSubmit={create} />}{editing && <EmployeeModal employee={editing} roles={data.roles} onClose={() => setEditing(null)} onSubmit={update} />}</>;
 }
 
 function Access({ data, reload, notify }) {
-  const [creating, setCreating] = useState(false); const [testEmail, setTestEmail] = useState("");
+  const [creating, setCreating] = useState(false); const [editing, setEditing] = useState(null); const [testEmail, setTestEmail] = useState("");
   async function create(values) { const result = await attempt(notify, () => request("/auth/users", { method: "POST", body: JSON.stringify(values) })); if (!result.ok) return; notify("Usuario creado"); setCreating(false); reload(); }
-  async function changeRole(user, roleId) { const result = await attempt(notify, () => request(`/auth/users/${user.id}`, { method: "PATCH", body: JSON.stringify({ roleId }) })); if (!result.ok) return; notify("Rol actualizado"); reload(); }
+  async function updateAccess(values) { const result = await attempt(notify, () => request(`/auth/users/${values.id}`, { method: "PATCH", body: JSON.stringify(values) })); if (!result.ok) return; notify("Rol, estado y modulos actualizados"); setEditing(null); reload(); }
   async function testMail() { const result = await attempt(notify, () => request("/notifications/test", { method: "POST", body: JSON.stringify({ to: testEmail }) })); if (!result.ok) return; notify(result.value.status === "sent" ? "Correo de prueba aceptado por Brevo" : `Correo en cola: ${result.value.error || result.value.status}`, result.value.status === "sent" ? "success" : "warning"); reload(); }
-  return <div className="access-layout"><section className="panel"><PanelHeader title="Usuarios del sistema" action="Nuevo usuario" onClick={() => setCreating(true)} />{data.users.map((user) => <div className="user-row" key={user.id}><Avatar name={user.name} /><span><b>{user.name}</b><small>{user.username} - {user.email || "sin correo"}</small></span><select value={user.roleId} onChange={(e) => changeRole(user, e.target.value)}>{data.roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select><Status status={user.status} /></div>)}</section><section className="panel"><PanelHeader title="Roles y modulos" />{data.roles.map((role) => <article className="role-row" key={role.id}><header><b>{role.name}</b><small>{role.modules.length} permisos</small></header><p>{role.description}</p><div className="module-tags">{role.modules.map((module) => <span key={module}>{module}</span>)}</div></article>)}<div className="email-test"><Field label="Prueba de correo Brevo" value={testEmail} placeholder="correo@ejemplo.com" onChange={setTestEmail} /><button className="primary" disabled={!testEmail} onClick={testMail}><Mail size={16} /> Enviar prueba</button><small>API: {data.emailConfig.apiConfigured ? "configurada" : "pendiente"} - SMTP: {data.emailConfig.smtpConfigured ? "configurado" : "pendiente"}</small></div></section>{creating && <UserModal roles={data.roles} onClose={() => setCreating(false)} onSubmit={create} />}</div>;
+  return <div className="access-layout"><section className="panel"><PanelHeader title="Usuarios y permisos individuales" action="Nuevo usuario" onClick={() => setCreating(true)} />{data.users.map((user) => <div className="user-row" key={user.id}><Avatar name={user.name} /><span><b>{user.name}</b><small>{user.username} - {user.email || "sin correo"}</small></span><span className="user-access-copy"><b>{data.roles.find((role) => role.id === user.roleId)?.name || user.role}</b><small>{(user.modules || []).includes("all") ? "Todos los modulos" : `${(user.modules || []).length} modulos habilitados`}</small></span><Status status={user.status} /><IconButton title="Asignar o quitar modulos" onClick={() => setEditing(user)}><UserCog size={16} /></IconButton></div>)}</section><section className="panel"><PanelHeader title="Plantillas de roles" />{data.roles.map((role) => <article className="role-row" key={role.id}><header><b>{role.name}</b><small>{role.modules.includes("all") ? "Acceso total" : `${role.modules.length} permisos`}</small></header><p>{role.description}</p><div className="module-tags">{moduleNames(role.modules).map((module) => <span key={module}>{module}</span>)}</div></article>)}<div className="email-test"><Field label="Prueba de correo Brevo" value={testEmail} placeholder="correo@ejemplo.com" onChange={setTestEmail} /><button className="primary" disabled={!testEmail} onClick={testMail}><Mail size={16} /> Enviar prueba</button><small>API: {data.emailConfig.apiConfigured ? "configurada" : "pendiente"} - SMTP: {data.emailConfig.smtpConfigured ? "configurado" : "pendiente"}</small></div></section>{creating && <UserModal roles={data.roles} onClose={() => setCreating(false)} onSubmit={create} />}{editing && <UserAccessModal user={editing} roles={data.roles} onClose={() => setEditing(null)} onSubmit={updateAccess} />}</div>;
 }
 
-function ReservationModal({ reservation, rooms, reservations, onClose, onSubmit }) {
+function ReservationModal({ reservation, initialGuest, rooms, reservations, onClose, onSubmit }) {
   const today = new Date().toISOString().slice(0, 10);
   const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-  const [values, setValues] = useState(reservation ? { ...reservation, ...reservation.guest, action: reservation.status === "checked_in" ? "check_in" : "reserve" } : { name: "", documentType: "Cedula", documentNumber: "", email: "", phone: "", address: "", country: "", checkIn: today, checkOut: tomorrow, exitTime: "11:00", adults: 1, children: 0, roomId: "", nightlyRate: 0, source: "Recepcion", notes: "", action: "check_in" });
+  const [values, setValues] = useState(reservation ? { ...reservation, ...reservation.guest, action: reservation.status === "checked_in" ? "check_in" : "reserve" } : { name: initialGuest?.name || "", documentType: initialGuest?.documentType || "Cedula", documentNumber: initialGuest?.documentNumber || "", email: initialGuest?.email || "", phone: initialGuest?.phone || "", address: initialGuest?.address || "", country: initialGuest?.country || "", checkIn: today, checkOut: tomorrow, exitTime: "11:00", adults: 1, children: 0, roomId: "", nightlyRate: 0, source: "Recepcion", notes: "", action: "check_in" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const eligible = rooms.filter((room) => {
@@ -580,7 +647,7 @@ function ReservationModal({ reservation, rooms, reservations, onClose, onSubmit 
   return <Modal title={reservation ? `Editar o ampliar ${reservation.code}` : "Registrar nueva estadia"} onClose={busy ? () => {} : onClose} size="large"><div className="modal-section"><h4>Datos del huesped</h4><div className="form-grid"><Field label="Nombre completo" required value={values.name} onChange={(name) => update({ name })} /><Field label="Cedula o RUC" value={values.documentNumber} onChange={(documentNumber) => update({ documentNumber })} /><Field label="Tipo de documento" type="select" options={["Cedula", "RUC", "Pasaporte"]} value={values.documentType} onChange={(documentType) => update({ documentType })} /><Field label="Correo" type="email" value={values.email} onChange={(email) => update({ email })} /><Field label="Telefono" value={values.phone} onChange={(phone) => update({ phone })} /><Field label="Nacionalidad" value={values.country} onChange={(country) => update({ country })} /><Field label="Direccion" value={values.address} onChange={(address) => update({ address })} /></div></div><div className="modal-section"><h4>Estadia</h4><div className="form-grid"><Field label="Entrada" type="date" required value={values.checkIn} onChange={(checkIn) => update({ checkIn })} /><Field label="Salida" type="date" required value={values.checkOut} onChange={(checkOut) => update({ checkOut })} /><Field label="Hora de salida" type="time" value={values.exitTime} onChange={(exitTime) => update({ exitTime })} /><Field label="Adultos" type="number" min="1" value={values.adults} onChange={(adults) => update({ adults })} /><Field label="Ninos" type="number" min="0" value={values.children} onChange={(children) => update({ children })} /><Field label="Origen" type="select" options={["Recepcion", "Telefono", "WhatsApp", "Booking", "Web"]} value={values.source} onChange={(source) => update({ source })} /></div><Field label="Habitacion disponible" type="select" value={values.roomId} onChange={(roomId) => update({ roomId })} options={[{ value: "", label: "Seleccionar habitacion" }, ...eligible.map((room) => ({ value: room.id, label: `Hab. ${room.id} - ${room.type} - ${money(room.rate)}/noche` }))]} /><div className="form-grid"><Field label="Tarifa por noche" type="number" value={values.nightlyRate} onChange={(nightlyRate) => update({ nightlyRate })} /><Field label="Accion inicial" type="select" options={[{ value: "reserve", label: "Confirmar reserva" }, { value: "check_in", label: "Ingresar ahora" }]} value={values.action} onChange={(action) => update({ action })} /></div><Field label="Notas internas" type="textarea" value={values.notes} onChange={(notes) => update({ notes })} /></div><div className="calculation"><span><small>Noches</small><b>{nights}</b></span><span><small>Habitacion</small><b>{selected ? `Hab. ${selected.id}` : "-"}</b></span><span><small>Tarifa</small><b>{money(values.nightlyRate)}</b></span><span><small>Total hospedaje</small><b>{money(nights * Number(values.nightlyRate || 0))}</b></span></div>{error && <p className="form-error">{error}</p>}<button className="primary full" disabled={busy || !values.name || !values.roomId || !values.checkOut || values.checkOut <= values.checkIn} onClick={submit}><Save size={17} /> {busy ? "Guardando estadia..." : reservation ? "Guardar cambios" : values.action === "check_in" ? "Registrar check-in" : "Confirmar reserva"}</button></Modal>;
 }
 
-function GuestModal({ guest, onClose, onSubmit }) { const [values, setValues] = useState(guest); return <Modal title="Editar huesped" onClose={onClose}><div className="form-grid"><Field label="Nombre" value={values.name} onChange={(name) => setValues({ ...values, name })} /><Field label="Documento" value={values.documentNumber} onChange={(documentNumber) => setValues({ ...values, documentNumber })} /><Field label="Correo" type="email" value={values.email} onChange={(email) => setValues({ ...values, email })} /><Field label="Telefono" value={values.phone} onChange={(phone) => setValues({ ...values, phone })} /><Field label="Nacionalidad" value={values.country} onChange={(country) => setValues({ ...values, country })} /><Field label="Direccion" value={values.address} onChange={(address) => setValues({ ...values, address })} /></div><button className="primary full" onClick={() => onSubmit(values)}><Save size={16} /> Guardar huesped</button></Modal>; }
+function GuestModal({ guest, onClose, onSubmit }) { const [values, setValues] = useState(guest || { name: "", documentType: "Cedula", documentNumber: "", email: "", phone: "", country: "", address: "", notes: "" }); return <Modal title={guest ? "Editar huesped" : "Nuevo huesped"} onClose={onClose}><div className="form-grid"><Field label="Nombre" required value={values.name} onChange={(name) => setValues({ ...values, name })} /><Field label="Tipo de documento" type="select" options={["Cedula", "RUC", "Pasaporte"]} value={values.documentType} onChange={(documentType) => setValues({ ...values, documentType })} /><Field label="Documento" value={values.documentNumber} onChange={(documentNumber) => setValues({ ...values, documentNumber })} /><Field label="Correo" type="email" value={values.email} onChange={(email) => setValues({ ...values, email })} /><Field label="Telefono" value={values.phone} onChange={(phone) => setValues({ ...values, phone })} /><Field label="Nacionalidad" value={values.country} onChange={(country) => setValues({ ...values, country })} /><Field label="Direccion" value={values.address} onChange={(address) => setValues({ ...values, address })} /></div><Field label="Notas del huesped" type="textarea" value={values.notes} onChange={(notes) => setValues({ ...values, notes })} /><button className="primary full" disabled={!values.name} onClick={() => onSubmit(values)}><Save size={16} /> {guest ? "Guardar huesped" : "Agregar al directorio"}</button></Modal>; }
 
 function ChargeModal({ reservation, onClose, onSubmit }) {
   const [values, setValues] = useState({ category: "Servicio adicional", description: "", quantity: 1, unitPrice: 0, notes: "" });
@@ -597,7 +664,7 @@ function ChargeModal({ reservation, onClose, onSubmit }) {
   </Modal>;
 }
 
-function PaymentModal({ reservation, payments, onClose, onSubmit }) {
+function PaymentModal({ reservation, payments, onClose, onSubmit, checkout = false }) {
   const totalPaid = paymentTotal(payments, reservation.id);
   const pending = Math.max(0, Number(reservation.total || 0) - totalPaid);
   const [values, setValues] = useState({ amount: pending, received: pending, method: "Efectivo", reference: "", notes: "Pago de hospedaje", idempotencyKey: `payment:${reservation.id}:${globalThis.crypto?.randomUUID?.() || Date.now()}` });
@@ -612,25 +679,26 @@ function PaymentModal({ reservation, payments, onClose, onSubmit }) {
     try { await onSubmit(values); }
     catch (requestError) { setError(requestError.message || "No se pudo registrar el pago"); setBusy(false); }
   }
-  return <Modal title={`Registrar pago - ${reservation.code || "factura"}`} onClose={busy ? () => {} : onClose}>
+  return <Modal title={`${checkout ? "Cobrar y marcar salida" : "Registrar pago"} - ${reservation.code || "factura"}`} onClose={busy ? () => {} : onClose}>
     <div className="calculation"><span><small>Total</small><b>{money(reservation.total)}</b></span><span><small>Pagado</small><b>{money(totalPaid)}</b></span><span><small>Pendiente</small><b>{money(pending)}</b></span><span><small>Cambio</small><b>{money(change)}</b></span></div>
     <div className="form-grid"><Field label="Metodo" type="select" options={["Efectivo", "Transferencia", "Tarjeta", "Deposito"]} value={values.method} onChange={(method) => setValues({ ...values, method, received: method === "Efectivo" ? values.received : values.amount })} /><Field label="Monto aplicado" type="number" min="0.01" max={pending} step="0.01" value={values.amount} onChange={(amount) => setValues({ ...values, amount })} /><Field label="Recibido del cliente" type="number" min="0" step="0.01" value={values.received} disabled={values.method !== "Efectivo"} onChange={(received) => setValues({ ...values, received })} /><Field label="Referencia" value={values.reference} onChange={(reference) => setValues({ ...values, reference })} /></div>
     <Field label="Nota" value={values.notes} onChange={(notes) => setValues({ ...values, notes })} />
     {values.amount > pending && <p className="form-error">El monto supera el saldo pendiente de {money(pending)}.</p>}
     {error && <p className="form-error">{error}</p>}
-    <button className="primary full" disabled={busy || invalid} onClick={submit}><CreditCard size={16} /> {busy ? "Registrando pago..." : "Confirmar pago"}</button>
+    {checkout && <p className="operation-note"><CheckCircle2 size={16} /> Al confirmar se registra el pago, se emite la factura, se marca la salida y la habitacion pasa a limpieza.</p>}
+    <button className="primary full" disabled={busy || invalid} onClick={submit}><CreditCard size={16} /> {busy ? "Procesando..." : checkout ? "Cobrar saldo y finalizar estadia" : "Confirmar pago"}</button>
   </Modal>;
 }
 
-function ReservationDetail({ item, payments, onClose }) { const account = paymentSummary(payments, item.id, item.total); return <Modal title={`${item.code} - ${item.guest?.name}`} onClose={onClose} size="large"><div className="detail-grid"><Info label="Estado"><Status status={isOverdueStay(item) ? "overdue" : item.status} /></Info><Info label="Habitacion">Hab. {item.roomId} - {item.roomType}</Info><Info label="Estadia">{dateText(item.checkIn)} - {dateText(item.checkOut)}</Info><Info label="Contacto">{item.guest?.email || "-"} / {item.guest?.phone || "-"}</Info></div><h4>Detalle de la cuenta</h4><LineItems lines={item.lines || []} /><div className="calculation"><span><small>Total</small><b>{money(item.total)}</b></span><span><small>Pagado</small><b>{money(account.paid)}</b></span><span><small>Pendiente</small><b>{money(account.balance)}</b></span><span><small>Sobrepago</small><b className={account.overpaid > 0 ? "negative" : ""}>{money(account.overpaid)}</b></span></div><h4>Pagos</h4><PaymentList items={payments.filter((payment) => payment.reservationId === item.id)} /></Modal>; }
+function ReservationDetail({ item, payments, onClose }) { const account = paymentSummary(payments, item.id, item.total); return <Modal title={`${item.code} - ${item.guest?.name}`} onClose={onClose} size="large"><div className="detail-grid"><Info label="Estado"><Status status={isOverdueStay(item) ? "overdue" : item.status} /></Info><Info label="Habitacion">Hab. {item.roomId} - {item.roomType}</Info><Info label="Estadia">{dateText(item.checkIn)} - {dateText(item.checkOut)}</Info><Info label="Contacto">{item.guest?.email || "-"} / {item.guest?.phone || "-"}</Info><Info label="Registrada por">{item.audit?.find((entry) => entry.action === "reservation_created")?.actor || "Recepcion"}</Info><Info label="Finalizada por">{item.checkedOutBy || item.audit?.find((entry) => entry.action === "checkout")?.actor || "Aun no finalizada"}</Info></div><h4>Detalle de la cuenta</h4><LineItems lines={item.lines || []} /><div className="calculation"><span><small>Total</small><b>{money(item.total)}</b></span><span><small>Pagado</small><b>{money(account.paid)}</b></span><span><small>Pendiente</small><b>{money(account.balance)}</b></span><span><small>Sobrepago</small><b className={account.overpaid > 0 ? "negative" : ""}>{money(account.overpaid)}</b></span></div><h4>Pagos</h4><PaymentList items={payments.filter((payment) => payment.reservationId === item.id)} /></Modal>; }
 
-function GuestHistoryModal({ guest, stays, payments, onClose }) {
+function GuestHistoryModal({ guest, stays, payments, onClose, onNewStay }) {
   return <Modal title={`Historial - ${guest.name}`} onClose={onClose} size="large">
-    <div className="detail-grid"><Info label="Documento">{guest.documentType} {guest.documentNumber || "-"}</Info><Info label="Correo">{guest.email || "-"}</Info><Info label="Telefono">{guest.phone || "-"}</Info><Info label="Estadias registradas">{stays.length}</Info></div>
+    <div className="history-heading"><div className="detail-grid"><Info label="Documento">{guest.documentType} {guest.documentNumber || "-"}</Info><Info label="Correo">{guest.email || "-"}</Info><Info label="Telefono">{guest.phone || "-"}</Info><Info label="Estadias registradas">{stays.length}</Info></div><button className="primary" onClick={onNewStay}><Plus size={16} /> Registrar otra estadia</button></div>
     <h4>Estadias y saldos</h4>
     <div className="history-list">{stays.map((stay) => {
       const account = paymentSummary(payments, stay.id, stay.total);
-      return <article key={stay.id}><span><b>{stay.code} - Hab. {stay.roomId}</b><small>{dateText(stay.checkIn)} - {dateText(stay.checkOut)} ({stay.nights} noche(s))</small></span><span><b>{money(stay.total)}</b><small>{money(account.paid)} pagado / {money(account.balance)} pendiente</small>{account.overpaid > 0 && <small className="negative">Sobrepago {money(account.overpaid)}</small>}</span><Status status={isOverdueStay(stay) ? "overdue" : stay.status} /></article>;
+      return <article key={stay.id}><span><b>{stay.code} - Hab. {stay.roomId}</b><small>{dateText(stay.checkIn)} - {dateText(stay.checkOut)} ({stay.nights} noche(s))</small><small>Registro: {stay.audit?.find((entry) => entry.action === "reservation_created")?.actor || "Recepcion"}{stay.status === "checked_out" ? ` / Salida: ${stay.checkedOutBy || stay.audit?.find((entry) => entry.action === "checkout")?.actor || "Recepcion"}` : ""}</small></span><span><b>{money(stay.total)}</b><small>{money(account.paid)} pagado / {money(account.balance)} pendiente</small>{account.overpaid > 0 && <small className="negative">Sobrepago {money(account.overpaid)}</small>}</span><Status status={isOverdueStay(stay) ? "overdue" : stay.status} /></article>;
     })}{!stays.length && <Empty icon={BookOpenCheck} text="Este huesped aun no tiene estadias" />}</div>
   </Modal>;
 }
@@ -652,8 +720,8 @@ function InvoiceModal({ invoice, payments, delivery, onSend, onVoid, onClose }) 
     {error && <p className="form-error">{error}</p>}
     <article className="invoice-document">
       <header className="invoice-brand">
-        <div className="invoice-logo"><Building2 size={21} /><span>WI</span></div>
-        <div className="invoice-hotel"><strong>Wild Incas</strong><span>Backpackers Hostal</span><small>Cuenca, Ecuador / Gestion hotelera</small></div>
+        <div className="invoice-logo"><img src="/wild-incas-brand.png" alt="Wild Incas" /></div>
+        <div className="invoice-hotel"><strong>Wild Incas</strong><span>Hotel management</span><small>Cuenca, Ecuador</small></div>
         <div className="invoice-identity"><small>FACTURA DE HOSPEDAJE</small><b>{invoice.number}</b><Status status={invoice.paymentStatus} /></div>
       </header>
       <section className="invoice-meta">
@@ -686,7 +754,33 @@ function IncidentModal({ rooms, onClose, onSubmit }) { const [values, setValues]
 
 function MovementModal({ onClose, onSubmit }) { const [values, setValues] = useState({ type: "expense", category: "Operativo", concept: "", method: "Efectivo", reference: "", amount: 0, notes: "" }); return <Modal title="Movimiento contable" onClose={onClose}><div className="form-grid"><Field label="Tipo" type="select" options={[{ value: "income", label: "Ingreso" }, { value: "expense", label: "Gasto" }]} value={values.type} onChange={(type) => setValues({ ...values, type })} /><Field label="Categoria" value={values.category} onChange={(category) => setValues({ ...values, category })} /><Field label="Concepto" value={values.concept} onChange={(concept) => setValues({ ...values, concept })} /><Field label="Metodo" type="select" options={["Efectivo", "Transferencia", "Tarjeta", "Deposito"]} value={values.method} onChange={(method) => setValues({ ...values, method })} /><Field label="Referencia" value={values.reference} onChange={(reference) => setValues({ ...values, reference })} /><Field label="Monto" type="number" value={values.amount} onChange={(amount) => setValues({ ...values, amount })} /></div><Field label="Observaciones" type="textarea" value={values.notes} onChange={(notes) => setValues({ ...values, notes })} /><button className="primary full" disabled={!values.concept || values.amount <= 0} onClick={() => onSubmit(values)}><Save size={16} /> Guardar movimiento</button></Modal>; }
 
-function EmployeeModal({ employee, roles, onClose, onSubmit }) { const [values, setValues] = useState(employee || { name: "", roleId: "recepcion", role: "Recepcion", shift: "Tarde", hours: "14:00 - 22:00", phone: "", email: "", username: "", password: "", modules: [] }); const modules = nav.map((item) => item.id); function toggle(id) { setValues({ ...values, modules: values.modules?.includes(id) ? values.modules.filter((item) => item !== id) : [...(values.modules || []), id] }); } return <Modal title={employee ? "Editar empleado" : "Nuevo empleado y acceso"} onClose={onClose} size="large"><div className="form-grid"><Field label="Nombre" value={values.name} onChange={(name) => setValues({ ...values, name })} /><Field label="Cargo" value={values.role} onChange={(role) => setValues({ ...values, role })} /><Field label="Turno" type="select" options={["Manana", "Tarde", "Noche"]} value={values.shift} onChange={(shift) => setValues({ ...values, shift })} /><Field label="Horario" value={values.hours} onChange={(hours) => setValues({ ...values, hours })} /><Field label="Telefono" value={values.phone} onChange={(phone) => setValues({ ...values, phone })} /><Field label="Correo" type="email" value={values.email} onChange={(email) => setValues({ ...values, email })} /><Field label="Usuario" value={values.username} onChange={(username) => setValues({ ...values, username })} /><Field label="Contrasena temporal" type="password" value={values.password} onChange={(password) => setValues({ ...values, password })} /><Field label="Rol de acceso" type="select" options={roles.map((role) => ({ value: role.id, label: role.name }))} value={values.roleId} onChange={(roleId) => setValues({ ...values, roleId, modules: roles.find((role) => role.id === roleId)?.modules || [] })} /></div><div className="permission-picker">{modules.map((id) => <button type="button" key={id} className={values.modules?.includes(id) ? "selected" : ""} onClick={() => toggle(id)}>{nav.find((item) => item.id === id)?.label}</button>)}</div><button className="primary full" disabled={!values.name || !values.email} onClick={() => onSubmit(values)}><UserCog size={16} /> {employee ? "Guardar empleado" : "Crear empleado y cuenta"}</button></Modal>; }
+function EmployeeModal({ employee, roles, onClose, onSubmit }) {
+  const defaultRole = roles.find((role) => role.id === "recepcion");
+  const [values, setValues] = useState(employee || { name: "", roleId: "recepcion", role: "Recepcion", shift: "Tarde", hours: "14:00 - 22:00", phone: "", email: "", username: "", password: "", status: "active", modules: defaultRole?.modules || [] });
+  const modules = permissionOptions.map((item) => item.id);
+  function changeRole(roleId) {
+    const role = roles.find((item) => item.id === roleId);
+    setValues({ ...values, roleId, role: role?.name || values.role, modules: role?.modules?.includes("all") ? modules : role?.modules || [] });
+  }
+  function toggle(id) { setValues({ ...values, modules: values.modules?.includes(id) ? values.modules.filter((item) => item !== id) : [...(values.modules || []), id] }); }
+  return <Modal title={employee ? "Editar empleado y acceso" : "Nuevo empleado y cuenta"} onClose={onClose} size="large">
+    <div className="modal-section"><h4>Datos laborales</h4><div className="form-grid"><Field label="Nombre completo" required value={values.name} onChange={(name) => setValues({ ...values, name })} /><Field label="Cargo" value={values.role} onChange={(role) => setValues({ ...values, role })} /><Field label="Turno" type="select" options={["Manana", "Tarde", "Noche"]} value={values.shift} onChange={(shift) => setValues({ ...values, shift })} /><Field label="Horario" value={values.hours} onChange={(hours) => setValues({ ...values, hours })} /><Field label="Telefono" value={values.phone} onChange={(phone) => setValues({ ...values, phone })} />{employee && <Field label="Estado" type="select" options={[{ value: "active", label: "Activo" }, { value: "inactive", label: "Inactivo" }]} value={values.status} onChange={(status) => setValues({ ...values, status })} />}</div></div>
+    <div className="modal-section"><h4>Cuenta de acceso</h4><div className="form-grid"><Field label="Correo electronico" type="email" required value={values.email} onChange={(email) => setValues({ ...values, email, username: values.username || email.split("@")[0] })} /><Field label="Usuario" required value={values.username} onChange={(username) => setValues({ ...values, username })} />{!employee && <Field label="Contrasena temporal" type="password" value={values.password} placeholder="Se genera si queda vacia" onChange={(password) => setValues({ ...values, password })} />}<Field label="Plantilla de rol" type="select" options={roles.map((role) => ({ value: role.id, label: role.name }))} value={values.roleId} onChange={changeRole} /></div></div>
+    <div className="modal-section permission-section"><div className="section-heading"><span><h4>Modulos permitidos</h4><p>Puede asignar o quitar cada modulo sin cambiar el cargo del empleado.</p></span><b>{values.modules?.filter((id) => modules.includes(id)).length || 0} de {modules.length}</b></div><div className="permission-picker">{permissionOptions.map(({ id, label }) => <button type="button" key={id} className={values.modules?.includes(id) ? "selected" : ""} onClick={() => toggle(id)}>{values.modules?.includes(id) && <Check size={14} />}{label}</button>)}</div></div>
+    <button className="primary full" disabled={!values.name || !values.email || !values.username} onClick={() => onSubmit(values)}><UserCog size={16} /> {employee ? "Guardar empleado y permisos" : "Crear empleado y enviar acceso"}</button>
+  </Modal>;
+}
+
+function UserAccessModal({ user, roles, onClose, onSubmit }) {
+  const allModules = permissionOptions.map((item) => item.id);
+  const [values, setValues] = useState({ ...user, modules: user.modules?.includes("all") ? allModules : user.modules || [] });
+  function changeRole(roleId) {
+    const role = roles.find((item) => item.id === roleId);
+    setValues({ ...values, roleId, modules: role?.modules?.includes("all") ? allModules : role?.modules || [] });
+  }
+  function toggle(id) { setValues({ ...values, modules: values.modules.includes(id) ? values.modules.filter((item) => item !== id) : [...values.modules, id] }); }
+  return <Modal title={`Permisos de ${user.name}`} onClose={onClose} size="large"><div className="access-user-header"><Avatar name={user.name} /><span><b>{user.name}</b><small>{user.username} - {user.email}</small></span><Status status={values.status} /></div><div className="form-grid"><Field label="Plantilla de rol" type="select" options={roles.map((role) => ({ value: role.id, label: role.name }))} value={values.roleId} onChange={changeRole} /><Field label="Estado de la cuenta" type="select" options={[{ value: "active", label: "Activo" }, { value: "inactive", label: "Inactivo" }]} value={values.status} onChange={(status) => setValues({ ...values, status })} /></div><div className="modal-section permission-section"><div className="section-heading"><span><h4>Acceso por modulo</h4><p>El Gateway bloqueara cualquier modulo que no este seleccionado.</p></span><b>{values.modules.filter((id) => allModules.includes(id)).length} de {allModules.length}</b></div><div className="permission-picker">{permissionOptions.map(({ id, label }) => <button type="button" key={id} className={values.modules.includes(id) ? "selected" : ""} onClick={() => toggle(id)}>{values.modules.includes(id) && <Check size={14} />}{label}</button>)}</div></div><button className="primary full" disabled={!values.modules.length} onClick={() => onSubmit(values)}><ShieldCheck size={16} /> Guardar permisos individuales</button></Modal>;
+}
 
 function UserModal({ roles, onClose, onSubmit }) { const [values, setValues] = useState({ name: "", username: "", email: "", password: "", roleId: "recepcion" }); return <Modal title="Nuevo usuario" onClose={onClose}><div className="form-grid"><Field label="Nombre" value={values.name} onChange={(name) => setValues({ ...values, name })} /><Field label="Usuario" value={values.username} onChange={(username) => setValues({ ...values, username })} /><Field label="Correo" type="email" value={values.email} onChange={(email) => setValues({ ...values, email })} /><Field label="Contrasena" type="password" value={values.password} onChange={(password) => setValues({ ...values, password })} /><Field label="Rol" type="select" options={roles.map((role) => ({ value: role.id, label: role.name }))} value={values.roleId} onChange={(roleId) => setValues({ ...values, roleId })} /></div><button className="primary full" onClick={() => onSubmit(values)}><UserCog size={16} /> Crear usuario</button></Modal>; }
 
@@ -701,6 +795,10 @@ function MiniKpi({ title, value, detail }) { return <article className="kpi mini
 function Info({ label, children }) { return <div className="info"><small>{label}</small><b>{children}</b></div>; }
 function StatusFilters({ values, active, onChange }) { return <div className="status-filters">{values.map((value) => <button key={value} className={active === value ? "active" : ""} onClick={() => onChange(value)}>{labels[value] || value}</button>)}</div>; }
 function paymentTotal(payments, reservationId) { return Number(payments.filter((item) => item.status !== "voided" && item.reservationId === reservationId).reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2)); }
+function moduleNames(modules = []) {
+  const legacyLabels = { habitaciones: "Habitaciones", huespedes: "Huespedes", bitacora: "Bitacora", caja: "Caja", ingresos: "Contabilidad" };
+  return modules.includes("all") ? ["Todos los modulos"] : modules.map((id) => permissionOptions.find((item) => item.id === id)?.label || legacyLabels[id] || id);
+}
 function paymentSummary(payments, reservationId, total) { const paid = paymentTotal(payments, reservationId); return { paid, balance: Number(Math.max(0, Number(total || 0) - paid).toFixed(2)), overpaid: Number(Math.max(0, paid - Number(total || 0)).toFixed(2)) }; }
 function isOverdueStay(item) {
   if (item.status !== "checked_in" || !item.checkOut) return false;
