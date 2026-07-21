@@ -26,9 +26,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 250px minmax(0, 1fr); }
 .sidebar { position: sticky; top: 0; height: 100vh; background: var(--charcoal); color: #f1eee8; padding: 18px 14px 16px; display: flex; flex-direction: column; overflow-y: auto; border-right: 3px solid var(--burgundy); }
-.brand { display: grid; flex-shrink: 0; gap: 5px; margin: 0 5px 18px; padding: 9px; background: #f6f4ef; border-radius: 5px; overflow: hidden; }
-.brand img { width: 100%; height: 48px; object-fit: cover; object-position: center 31%; display: block; }
-.brand small { color: #73675c; font-size: 9px; font-weight: 800; text-transform: uppercase; text-align: center; }
+.brand { display: grid; flex-shrink: 0; gap: 5px; margin: 0 5px 18px; padding: 12px; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid #3a3631; }
+.brand img { width: 100%; height: auto; max-height: 70px; object-fit: contain; display: block; }
+.brand small { color: #73675c; font-size: 9px; font-weight: 800; text-transform: uppercase; text-align: center; letter-spacing: 1px; }
 .system-state { flex-shrink: 0; margin: 0 8px 20px; border: 1px solid #4a4641; background: #302d2a; padding: 10px; border-radius: 6px; color: #d2cbc2; font-size: 12px; font-weight: 700; }
 .system-state i { display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: #69c694; border-radius: 50%; }
 .sidebar nav { flex: 1; }
@@ -74,14 +74,15 @@ main { min-width: 0; padding: 28px 34px 56px; }
 .admin-note { display: flex; align-items: center; gap: 9px; padding: 11px 13px; border-left: 3px solid var(--gold); background: #f5f1e8; color: #655847; font-size: 10px; }
 .cash-help, .form-help { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-.kpi { background: white; border: 1px solid var(--line); border-radius: 7px; padding: 18px; min-width: 0; box-shadow: 0 3px 12px rgba(30, 55, 47, .04); }
+.kpi { background: white; border: 1px solid var(--line); border-radius: 12px; padding: 22px; min-width: 0; box-shadow: 0 8px 24px rgba(30, 55, 47, .06); transition: transform 0.2s, box-shadow 0.2s; }
+.kpi:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(30, 55, 47, .1); }
 .kpi > span { float: right; width: 34px; height: 34px; display: grid; place-items: center; background: #e8f1ed; color: var(--green); border-radius: 6px; }
 .kpi small { display: block; color: var(--muted); font-size: 11px; font-weight: 700; }
 .kpi strong { display: block; margin-top: 9px; font-size: 25px; line-height: 1.1; }
 .kpi p { margin: 8px 0 0; color: #83908b; font-size: 11px; }
 .kpi.mini { box-shadow: none; }
 .kpi.mini strong { font-size: 21px; }
-.reception-center { display: grid; grid-template-columns: minmax(190px, .55fr) minmax(0, 2.45fr); gap: 20px; align-items: stretch; padding: 18px 20px; background: #fff; border: 1px solid var(--line); border-left: 5px solid var(--gold); border-radius: 7px; box-shadow: var(--shadow); }
+.reception-center { display: grid; grid-template-columns: minmax(190px, .55fr) minmax(0, 2.45fr); gap: 20px; align-items: stretch; padding: 22px 24px; background: #fff; border: 1px solid var(--line); border-left: 5px solid var(--gold); border-radius: 12px; box-shadow: 0 8px 24px rgba(30, 55, 47, .06); }
 .reception-copy { align-self: center; }
 .reception-copy small { color: var(--burgundy); font-size: 9px; font-weight: 850; }
 .reception-copy h3 { margin: 5px 0 4px; font-size: 17px; }
@@ -100,7 +101,7 @@ main { min-width: 0; padding: 28px 34px 56px; }
 .quick-actions button.attention:not(.primary-action) { box-shadow: inset 3px 0 0 #c55249; background: #fffafa; }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(280px, .8fr); gap: 18px; }
 .span-2 { grid-column: 1 / -1; }
-.panel { background: white; border: 1px solid var(--line); border-radius: 7px; padding: 20px; box-shadow: var(--shadow); min-width: 0; }
+.panel { background: white; border: 1px solid var(--line); border-radius: 12px; padding: 24px; box-shadow: 0 8px 24px rgba(30, 55, 47, .06); min-width: 0; }
 .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
 .panel-header h3 { margin: 0; font-size: 17px; }
 .panel-header button { border: 0; background: transparent; color: var(--green-2); display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 750; }

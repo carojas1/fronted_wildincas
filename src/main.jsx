@@ -223,8 +223,14 @@ function App() {
       const updates = {};
       const failures = [];
       results.forEach((result, index) => {
-        if (result.status === "fulfilled") updates[sources[index][0]] = result.value;
-        else failures.push(sources[index][1]);
+        if (result.status === "fulfilled") {
+          updates[sources[index][0]] = result.value;
+        } else {
+          // Ignore 403s, they just mean the user doesn't have access to this specific dashboard widget data
+          if (result.reason?.status !== 403) {
+             failures.push(sources[index][1]);
+          }
+        }
       });
       if (Object.keys(updates).length) setData((current) => ({ ...current, ...updates }));
       if (failures.length) notify(`No se actualizaron ${failures.length} fuente(s). Se conservaron los ultimos datos validos.`, "warning");
@@ -396,34 +402,52 @@ function Dashboard({ data, navigate, notify, session }) {
     }
     setAttendanceBusy(false);
   }
-  const occupied = data.dashboard.occupiedRoomIds?.length || 0;
-  const occupancy = data.rooms.length ? Math.round((occupied / data.rooms.length) * 100) : 0;
-  const recentMovements = data.movements.filter((item) => item.status !== "voided").slice(0, 8);
-  const pendingCleaning = data.rooms.filter((room) => room.status === "cleaning").length;
-  const pendingDepartures = data.dashboard.departures?.length || 0;
-  const quickActions = [
-    { title: "Nueva estadia", detail: "Registrar huesped, fechas y habitacion", icon: CalendarCheck, target: "reservations", intent: "new-stay", primary: true },
-    { title: "Cobros pendientes", detail: money(data.metrics.accountsReceivable), icon: CreditCard, target: "reservations", intent: "balance-due", attention: Number(data.metrics.accountsReceivable || 0) > 0 },
-    { title: "Salidas por cerrar", detail: `${pendingDepartures} pendiente(s)`, icon: LogOut, target: "reservations", intent: "overdue", attention: pendingDepartures > 0 },
-    { title: "Habitaciones en limpieza", detail: `${pendingCleaning} pendiente(s)`, icon: Sparkles, target: "cleaning", attention: pendingCleaning > 0 }
-  ];
-  const cards = [
-    ["Ocupacion actual", `${occupancy}%`, `${occupied} de ${data.rooms.length} habitaciones`, BedDouble],
-    ["Cobros confirmados", money(data.metrics.collected), "Pagos efectivos registrados", TrendingUp],
-    ["Notas de venta", money(data.metrics.revenue), `${data.metrics.invoices || 0} comprobantes emitidos`, Receipt],
-    ["Por cobrar", money(data.metrics.accountsReceivable), "Saldos pendientes", WalletCards]
-  ];
+  const hasRooms = session.user.modules.includes("all") || session.user.modules.includes("rooms");
+  const hasReservations = session.user.modules.includes("all") || session.user.modules.includes("reservations");
+  const hasFinance = session.user.modules.includes("all") || session.user.modules.includes("income") || session.user.modules.includes("cash") || session.user.modules.includes("billing");
+  
+  const occupied = data.dashboard?.occupiedRoomIds?.length || 0;
+  const occupancy = data.rooms?.length ? Math.round((occupied / data.rooms.length) * 100) : 0;
+  const recentMovements = (data.movements || []).filter((item) => item.status !== "voided").slice(0, 8);
+  const pendingCleaning = (data.rooms || []).filter((room) => room.status === "cleaning").length;
+  const pendingDepartures = data.dashboard?.departures?.length || 0;
+  
+  const quickActions = [];
+  if (hasReservations) {
+    quickActions.push({ title: "Nueva estadia", detail: "Registrar huesped, fechas y habitacion", icon: CalendarCheck, target: "reservations", intent: "new-stay", primary: true });
+    quickActions.push({ title: "Salidas por cerrar", detail: `${pendingDepartures} pendiente(s)`, icon: LogOut, target: "reservations", intent: "overdue", attention: pendingDepartures > 0 });
+  }
+  if (hasFinance) {
+    quickActions.push({ title: "Cobros pendientes", detail: money(data.metrics?.accountsReceivable || 0), icon: CreditCard, target: "reservations", intent: "balance-due", attention: Number(data.metrics?.accountsReceivable || 0) > 0 });
+  }
+  if (hasRooms) {
+    quickActions.push({ title: "Habitaciones en limpieza", detail: `${pendingCleaning} pendiente(s)`, icon: Sparkles, target: "cleaning", attention: pendingCleaning > 0 });
+  }
+
+  const cards = [];
+  if (hasReservations) {
+    cards.push(["Ocupacion actual", `${occupancy}%`, `${occupied} de ${data.rooms?.length || 0} habitaciones`, BedDouble]);
+  }
+  if (hasFinance) {
+    cards.push(["Cobros confirmados", money(data.metrics?.collected || 0), "Pagos efectivos registrados", TrendingUp]);
+    cards.push(["Notas de venta", money(data.metrics?.revenue || 0), `${data.metrics?.invoices || 0} comprobantes emitidos`, Receipt]);
+    cards.push(["Por cobrar", money(data.metrics?.accountsReceivable || 0), "Saldos pendientes", WalletCards]);
+  }
+
   return <div className="dashboard-stack">
     <section className="welcome-strip"><div><small>{greetingLabel()}</small><h2>Bienvenido, {session.user.name}</h2><p>{welcomeMessage(session.user.role)}</p></div>{attendance?.employee && <div className="attendance-control"><span><i className={attendance.active ? "active" : ""} /><b>{attendance.active ? `En jornada desde ${timeText(attendance.active.startedAt)}` : "Jornada sin iniciar"}</b></span><button className={attendance.active ? "secondary" : "primary"} disabled={attendanceBusy} onClick={toggleAttendance}>{attendance.active ? <LogOut size={16} /> : <LogIn size={16} />}{attendanceBusy ? "Guardando..." : attendance.active ? "Marcar salida" : "Marcar entrada"}</button></div>}</section>
-    <section className="kpi-grid">{cards.map(([title, value, detail, Icon]) => <article className="kpi" key={title}><span><Icon size={18} /></span><small>{title}</small><strong>{value}</strong><p>{detail}</p></article>)}</section>
-    <section className="reception-center" aria-label="Acciones rapidas de recepcion"><div className="reception-copy"><small>RECEPCION</small><h3>Que necesitas hacer ahora?</h3><p>Accesos directos al flujo diario del hotel.</p></div><div className="quick-actions">{quickActions.map((action) => <button key={action.title} className={`${action.primary ? "primary-action" : ""} ${action.attention ? "attention" : ""}`} onClick={() => navigate(action.target, action.intent)}><span><action.icon size={18} /></span><b>{action.title}</b><small>{action.detail}</small><ChevronRight size={17} /></button>)}</div></section>
+    
+    {cards.length > 0 && <section className="kpi-grid">{cards.map(([title, value, detail, Icon]) => <article className="kpi" key={title}><span><Icon size={18} /></span><small>{title}</small><strong>{value}</strong><p>{detail}</p></article>)}</section>}
+    
+    {quickActions.length > 0 && <section className="reception-center" aria-label="Acciones rapidas"><div className="reception-copy"><small>ACCIONES FRECUENTES</small><h3>Que necesitas hacer ahora?</h3><p>Accesos directos a tus tareas diarias.</p></div><div className="quick-actions">{quickActions.map((action) => <button key={action.title} className={`${action.primary ? "primary-action" : ""} ${action.attention ? "attention" : ""}`} onClick={() => navigate(action.target, action.intent)}><span><action.icon size={18} /></span><b>{action.title}</b><small>{action.detail}</small><ChevronRight size={17} /></button>)}</div></section>}
+    
     <section className="dashboard-grid">
-      <article className="panel room-board"><PanelHeader title="Estado de habitaciones" action="Ver habitaciones" onClick={() => navigate("rooms")} /><div className="room-map">{data.rooms.map((room) => <RoomCompact key={room.id} room={room} />)}</div><RoomLegend /></article>
-      <article className="panel today"><PanelHeader title="Agenda de hoy" />
-        <AgendaBlock title="Llegadas" items={data.dashboard.arrivals} empty="Sin llegadas programadas" />
-        <AgendaBlock title="Salidas" items={data.dashboard.departures} empty="Sin salidas pendientes" />
-      </article>
-      <article className="panel span-2"><PanelHeader title="Actividad financiera reciente" action="Abrir contabilidad" onClick={() => navigate("income")} /><MovementList items={recentMovements} /></article>
+      {hasRooms && <article className="panel room-board"><PanelHeader title="Estado de habitaciones" action="Ver habitaciones" onClick={() => navigate("rooms")} /><div className="room-map">{(data.rooms || []).map((room) => <RoomCompact key={room.id} room={room} />)}</div><RoomLegend /></article>}
+      {hasReservations && <article className="panel today"><PanelHeader title="Agenda de hoy" />
+        <AgendaBlock title="Llegadas" items={data.dashboard?.arrivals || []} empty="Sin llegadas programadas" />
+        <AgendaBlock title="Salidas" items={data.dashboard?.departures || []} empty="Sin salidas pendientes" />
+      </article>}
+      {hasFinance && <article className="panel span-2"><PanelHeader title="Actividad financiera reciente" action="Abrir contabilidad" onClick={() => navigate("income")} /><MovementList items={recentMovements} /></article>}
     </section>
   </div>;
 }
