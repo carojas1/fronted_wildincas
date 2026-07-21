@@ -154,7 +154,9 @@ async function request(path, options = {}) {
         window.dispatchEvent(new CustomEvent("simot:unauthorized", { detail: payload.error?.message }));
       }
     }
-    throw new Error(payload.error?.message || `Error ${response.status}`);
+    const err = new Error(payload.error?.message || `Error ${response.status}`);
+    err.status = response.status;
+    throw err;
   }
   return payload.data;
 }
