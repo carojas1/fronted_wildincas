@@ -852,8 +852,11 @@ function PaymentModal({ reservation, payments, onClose, onSubmit }) {
   const [values, setValues] = useState({ amount: pending, received: pending, method: "Efectivo", reference: "", notes: "Pago de hospedaje", idempotencyKey: `payment:${reservation.id}:${globalThis.crypto?.randomUUID?.() || Date.now()}` });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const change = values.method === "Efectivo" ? Math.max(0, Number(values.received || 0) - Number(values.amount || 0)) : 0;
-  const invalid = values.amount <= 0 || (values.method === "Efectivo" && values.received < values.amount);
+  const amountNum = Number(values.amount || 0);
+  const receivedNum = Number(values.received || 0);
+  const change = values.method === "Efectivo" ? Math.max(0, receivedNum - amountNum) : 0;
+  const remainingAfter = Math.max(0, pending - amountNum);
+  const invalid = amountNum <= 0 || (values.method === "Efectivo" && receivedNum < amountNum);
   async function submit() {
     if (busy || invalid) return;
     setBusy(true);
@@ -862,10 +865,10 @@ function PaymentModal({ reservation, payments, onClose, onSubmit }) {
     catch (requestError) { setError(requestError.message || "No se pudo registrar el pago"); setBusy(false); }
   }
   return <Modal title={`Registrar cobro - ${reservation.code || "estadia"}`} onClose={busy ? () => {} : onClose}>
-    <div className="calculation"><span><small>Total</small><b>{money(reservation.total)}</b></span><span><small>Pagado</small><b>{money(totalPaid)}</b></span><span><small>Pendiente</small><b>{money(pending)}</b></span><span><small>Cambio</small><b>{money(change)}</b></span></div>
+    <div className="calculation"><span><small>Total</small><b>{money(reservation.total)}</b></span><span><small>Ya pagado</small><b>{money(totalPaid)}</b></span><span><small>Queda pendiente</small><b style={{ color: remainingAfter > 0 ? "var(--burgundy)" : "var(--green)" }}>{money(remainingAfter)}</b></span><span><small>Cambio al cliente</small><b style={{ color: change > 0 ? "var(--green)" : "" }}>{money(change)}</b></span></div>
     <div className="form-grid"><Field label="Metodo" type="select" options={["Efectivo", "Transferencia", "Tarjeta", "Deposito"]} value={values.method} onChange={(method) => setValues({ ...values, method, received: method === "Efectivo" ? values.received : values.amount })} /><Field label="Monto a cobrar" type="number" min="0.01" step="0.01" value={values.amount} onChange={(amount) => setValues({ ...values, amount })} /><Field label="Recibido del cliente" type="number" min="0" step="0.01" value={values.received} disabled={values.method !== "Efectivo"} onChange={(received) => setValues({ ...values, received })} /><Field label="Referencia" value={values.reference} onChange={(reference) => setValues({ ...values, reference })} /></div>
     <Field label="Nota" value={values.notes} onChange={(notes) => setValues({ ...values, notes })} />
-    {values.amount > pending && <p className="operation-note">El monto a cobrar supera el saldo pendiente. Se registrara como sobrepago.</p>}
+    {amountNum > pending && <p className="operation-note"><CheckCircle2 size={15} /> Monto mayor al pendiente. Se registrara como sobrepago de {money(amountNum - pending)}.</p>}
     {error && <p className="form-error">{error}</p>}
     <p className="operation-note"><CheckCircle2 size={16} /> Este boton registra solamente el cobro. La salida se confirma por separado desde la estadia.</p>
     <button className="primary full" disabled={busy || invalid} onClick={submit}><CreditCard size={16} /> {busy ? "Procesando..." : "Guardar cobro"}</button>
