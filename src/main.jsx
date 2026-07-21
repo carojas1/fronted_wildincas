@@ -345,33 +345,31 @@ function Login({ onLogin }) {
   return <div className="login-page">
     <section className="login-brand">
       <div>
-        <p>Cuenca, Ecuador</p>
-        <div className="login-wordmark"><img src="/wild-incas-brand.png" alt="Wild Incas" /></div>
-        <h2>Cada llegada cuenta. Hagamos de hoy una estadia memorable.</h2>
-        <small>Reservas, habitaciones y administracion hotelera en una operacion clara.</small>
+        <img className="lb-logo" src="/wild-incas-brand.png" alt="Wild Incas" />
+        <p className="lb-name">Wild Incas Hostal</p>
+        <p className="lb-tagline">Sistema de gestion hotelera para el equipo de operaciones.</p>
+        <div className="lb-pills">
+          <span>Cuenca, Ecuador</span>
+          <span>Recepcion 24/7</span>
+          <span>SIMOT v2.1</span>
+        </div>
       </div>
-      <footer>
-        <span>Recepcion 24/7</span>
-        <span>Hospitalidad autentica</span>
-        <span>Datos protegidos</span>
-        <span>SIMOT v2.1</span>
-      </footer>
     </section>
     <div className="login-panel-wrap">
       <form className="login-panel" onSubmit={submit}>
-        <div className="login-icon"><ShieldCheck size={22} /></div>
+        <div className="login-icon"><ShieldCheck size={20} /></div>
         <p>ACCESO AL SISTEMA</p>
-        <h2>Bienvenido</h2>
-        <span className="login-subtitle">Ingresa tus credenciales para continuar</span>
+        <h2>Iniciar sesion</h2>
+        <span className="login-subtitle">Ingresa con tus credenciales de operacion</span>
         <Field label="Usuario" value={values.username} onChange={(username) => setValues({ ...values, username })} autoComplete="username" />
         <Field label="Contrasena" type="password" value={values.password} onChange={(password) => setValues({ ...values, password })} autoComplete="current-password" />
         <button className="primary full" disabled={busy || !values.username.trim() || !values.password}>
-          {busy ? "Conectando con la operacion..." : "Ingresar al sistema"}
+          {busy ? "Verificando..." : "Ingresar"}
         </button>
         <div className={`login-connection ${warming ? "warming" : "ready"}`}>
-          <i />{warming ? "Preparando servicios en la nube..." : "Servicios listos. Puedes ingresar."}
+          <i />{warming ? "Conectando con el servidor..." : "Servidor listo"}
         </div>
-        {error && <div className="form-error"><AlertTriangle size={16} /> {error}</div>}
+        {error && <div className="form-error"><AlertTriangle size={15} /> {error}</div>}
       </form>
     </div>
   </div>;
