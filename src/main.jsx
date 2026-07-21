@@ -203,9 +203,15 @@ async function requestSource(path) {
   try {
     return await request(path, { timeout: 30000 });
   } catch (error) {
-    if (/sesion|rol no permite/i.test(error.message || "")) throw error;
+    if (error.status === 403 || error.status === 404 || /sesion|rol no permite/i.test(error.message || "")) {
+      throw error;
+    }
     await new Promise((resolve) => setTimeout(resolve, 650));
-    return request(path, { timeout: 30000 });
+    try {
+      return await request(path, { timeout: 30000 });
+    } catch (retryError) {
+      throw retryError;
+    }
   }
 }
 
