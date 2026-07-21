@@ -234,8 +234,8 @@ function App() {
         if (result.status === "fulfilled") {
           updates[sources[index][0]] = result.value;
         } else {
-          // Ignore 403s, they just mean the user doesn't have access to this specific dashboard widget data
-          if (result.reason?.status !== 403) {
+          // Ignore 403s and 404s, they just mean the user doesn't have access to this specific dashboard widget data
+          if (result.reason?.status !== 403 && result.reason?.status !== 404) {
              failures.push(sources[index][1]);
           }
         }
@@ -358,24 +358,14 @@ function Login({ onLogin }) {
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
   return <div className="login-page">
-    <section className="login-brand">
-      <div>
-        <img className="lb-logo" src="/wild-incas-brand.png" alt="Wild Incas" />
-        <p className="lb-name">Wild Incas Hostal</p>
-        <p className="lb-tagline">Sistema de gestion hotelera para el equipo de operaciones.</p>
-        <div className="lb-pills">
-          <span>Cuenca, Ecuador</span>
-          <span>Recepcion 24/7</span>
-          <span>SIMOT v2.1</span>
-        </div>
-      </div>
-    </section>
     <div className="login-panel-wrap">
       <form className="login-panel" onSubmit={submit}>
-        <div className="login-icon"><ShieldCheck size={20} /></div>
-        <p>ACCESO AL SISTEMA</p>
-        <h2>Iniciar sesion</h2>
-        <span className="login-subtitle">Ingresa con tus credenciales de operacion</span>
+        <div style={{ textAlign: "center", marginBottom: "8px" }}>
+          <img src="/wild-incas-brand.png" alt="Wild Incas" style={{ height: "70px", objectFit: "contain" }} />
+        </div>
+        <p style={{ textAlign: "center" }}>ACCESO AL SISTEMA</p>
+        <h2 style={{ textAlign: "center" }}>Iniciar sesion</h2>
+        <span className="login-subtitle" style={{ textAlign: "center" }}>Ingresa con tus credenciales de operacion</span>
         <Field label="Usuario" value={values.username} onChange={(username) => setValues({ ...values, username })} autoComplete="username" />
         <Field label="Contrasena" type="password" value={values.password} onChange={(password) => setValues({ ...values, password })} autoComplete="current-password" />
         <button className="primary full" disabled={busy || !values.username.trim() || !values.password}>

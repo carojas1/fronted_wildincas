@@ -255,8 +255,9 @@ main { min-width: 0; padding: 28px 34px 56px; }
 /* ─── LOGIN ─────────────────────────────────────────────────── */
 .login-page {
   min-height: 100vh;
-  display: grid;
-  grid-template-columns: 340px 1fr;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: #f4f3f0;
 }
 .login-brand {
