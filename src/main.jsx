@@ -358,14 +358,24 @@ function Login({ onLogin }) {
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
   return <div className="login-page">
+    <section className="login-brand">
+      <div>
+        <img className="lb-logo" src="/wild-incas-brand.png" alt="Wild Incas" />
+        <p className="lb-name">Wild Incas Hostal</p>
+        <p className="lb-tagline">Sistema de gestion hotelera para el equipo de operaciones.</p>
+        <div className="lb-pills">
+          <span>Cuenca, Ecuador</span>
+          <span>Recepcion 24/7</span>
+          <span>SIMOT v2.1</span>
+        </div>
+      </div>
+    </section>
     <div className="login-panel-wrap">
       <form className="login-panel" onSubmit={submit}>
-        <div style={{ textAlign: "center", marginBottom: "8px" }}>
-          <img src="/wild-incas-brand.png" alt="Wild Incas" style={{ height: "70px", objectFit: "contain" }} />
-        </div>
-        <p style={{ textAlign: "center" }}>ACCESO AL SISTEMA</p>
-        <h2 style={{ textAlign: "center" }}>Iniciar sesion</h2>
-        <span className="login-subtitle" style={{ textAlign: "center" }}>Ingresa con tus credenciales de operacion</span>
+        <div className="login-icon"><ShieldCheck size={20} /></div>
+        <p>ACCESO AL SISTEMA</p>
+        <h2>Iniciar sesion</h2>
+        <span className="login-subtitle">Ingresa con tus credenciales de operacion</span>
         <Field label="Usuario" value={values.username} onChange={(username) => setValues({ ...values, username })} autoComplete="username" />
         <Field label="Contrasena" type="password" value={values.password} onChange={(password) => setValues({ ...values, password })} autoComplete="current-password" />
         <button className="primary full" disabled={busy || !values.username.trim() || !values.password}>
@@ -843,7 +853,7 @@ function PaymentModal({ reservation, payments, onClose, onSubmit }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const change = values.method === "Efectivo" ? Math.max(0, Number(values.received || 0) - Number(values.amount || 0)) : 0;
-  const invalid = values.amount <= 0 || values.amount > pending || (values.method === "Efectivo" && values.received < values.amount);
+  const invalid = values.amount <= 0 || (values.method === "Efectivo" && values.received < values.amount);
   async function submit() {
     if (busy || invalid) return;
     setBusy(true);
@@ -853,9 +863,9 @@ function PaymentModal({ reservation, payments, onClose, onSubmit }) {
   }
   return <Modal title={`Registrar cobro - ${reservation.code || "estadia"}`} onClose={busy ? () => {} : onClose}>
     <div className="calculation"><span><small>Total</small><b>{money(reservation.total)}</b></span><span><small>Pagado</small><b>{money(totalPaid)}</b></span><span><small>Pendiente</small><b>{money(pending)}</b></span><span><small>Cambio</small><b>{money(change)}</b></span></div>
-    <div className="form-grid"><Field label="Metodo" type="select" options={["Efectivo", "Transferencia", "Tarjeta", "Deposito"]} value={values.method} onChange={(method) => setValues({ ...values, method, received: method === "Efectivo" ? values.received : values.amount })} /><Field label="Monto aplicado" type="number" min="0.01" max={pending} step="0.01" value={values.amount} onChange={(amount) => setValues({ ...values, amount })} /><Field label="Recibido del cliente" type="number" min="0" step="0.01" value={values.received} disabled={values.method !== "Efectivo"} onChange={(received) => setValues({ ...values, received })} /><Field label="Referencia" value={values.reference} onChange={(reference) => setValues({ ...values, reference })} /></div>
+    <div className="form-grid"><Field label="Metodo" type="select" options={["Efectivo", "Transferencia", "Tarjeta", "Deposito"]} value={values.method} onChange={(method) => setValues({ ...values, method, received: method === "Efectivo" ? values.received : values.amount })} /><Field label="Monto a cobrar" type="number" min="0.01" step="0.01" value={values.amount} onChange={(amount) => setValues({ ...values, amount })} /><Field label="Recibido del cliente" type="number" min="0" step="0.01" value={values.received} disabled={values.method !== "Efectivo"} onChange={(received) => setValues({ ...values, received })} /><Field label="Referencia" value={values.reference} onChange={(reference) => setValues({ ...values, reference })} /></div>
     <Field label="Nota" value={values.notes} onChange={(notes) => setValues({ ...values, notes })} />
-    {values.amount > pending && <p className="form-error">El monto supera el saldo pendiente de {money(pending)}.</p>}
+    {values.amount > pending && <p className="operation-note">El monto a cobrar supera el saldo pendiente. Se registrara como sobrepago.</p>}
     {error && <p className="form-error">{error}</p>}
     <p className="operation-note"><CheckCircle2 size={16} /> Este boton registra solamente el cobro. La salida se confirma por separado desde la estadia.</p>
     <button className="primary full" disabled={busy || invalid} onClick={submit}><CreditCard size={16} /> {busy ? "Procesando..." : "Guardar cobro"}</button>
