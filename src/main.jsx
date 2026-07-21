@@ -100,7 +100,7 @@ const labels = {
 const emptyData = {
   rooms: [], reservations: [], guests: [], movements: [], incidents: [], checklist: [], employees: [],
   invoices: [], payments: [], notifications: [], dashboard: {}, summary: {}, metrics: {}, daily: {}, shifts: {},
-  users: [], roles: [], currentShift: null, emailConfig: {}, analytics: null
+  users: [], roles: [], currentShift: null, attendance: { active: [], history: [], employees: [] }, campaigns: [], emailConfig: {}, analytics: null
 };
 
 const viewSources = {
@@ -113,8 +113,8 @@ const viewSources = {
   billing: [["invoices", "/finance/invoices", []], ["payments", "/finance/payments", []], ["reservations", "/reservations/reservations", []], ["notifications", "/notifications/events", []], ["emailConfig", "/notifications/config", {}]],
   cash: [["daily", "/finance/daily", {}], ["shifts", "/finance/shifts", {}], ["checklist", "/operations/checklist", []]],
   income: [["summary", "/finance/summary", {}], ["movements", "/finance/movements", []], ["payments", "/finance/payments", []], ["invoices", "/finance/invoices", []]],
-  employees: [["employees", "/employees", []], ["currentShift", "/employees/current-shift", null], ["roles", "/auth/roles", []], ["users", "/auth/users", []]],
-  users: [["users", "/auth/users", []], ["roles", "/auth/roles", []], ["emailConfig", "/notifications/config", {}]]
+  employees: [["employees", "/employees", []], ["currentShift", "/employees/current-shift", null], ["attendance", "/employees/attendance", { active: [], history: [], employees: [] }], ["roles", "/auth/roles", []], ["users", "/auth/users", []]],
+  users: [["users", "/auth/users", []], ["employees", "/employees", []], ["guests", "/reservations/guests", []], ["campaigns", "/notifications/campaigns", []], ["roles", "/auth/roles", []], ["emailConfig", "/notifications/config", {}]]
 };
 
 function sessionValue() {
@@ -324,7 +324,7 @@ function App() {
 }
 
 function Login({ onLogin }) {
-  const [values, setValues] = useState({ username: "apolo", password: "admin123" });
+  const [values, setValues] = useState({ username: "", password: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [warming, setWarming] = useState(true);
@@ -343,14 +343,37 @@ function Login({ onLogin }) {
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
   return <div className="login-page">
-    <section className="login-brand"><div><p>Cuenca, Ecuador</p><div className="login-wordmark"><img src="/wild-incas-brand.png" alt="Wild Incas" /></div><h2>Cada llegada cuenta. Hagamos de hoy una estadia memorable.</h2><small>Reservas, habitaciones y administracion hotelera en una operacion clara.</small></div><footer><span>Recepcion 24/7</span><span>Hospitalidad autentica</span><span>Datos protegidos</span></footer></section>
-    <form className="login-panel" onSubmit={submit}><div className="login-icon"><ShieldCheck size={22} /></div><p>ACCESO AL SISTEMA</p><h2>Bienvenido</h2>
-      <Field label="Usuario" value={values.username} onChange={(username) => setValues({ ...values, username })} autoComplete="username" />
-      <Field label="Contrasena" type="password" value={values.password} onChange={(password) => setValues({ ...values, password })} autoComplete="current-password" />
-      <button className="primary" disabled={busy}>{busy ? "Conectando con la operacion..." : "Ingresar"}</button>
-      <div className={`login-connection ${warming ? "warming" : "ready"}`}><i />{warming ? "Preparando servicios de produccion" : "Servicios listos para iniciar sesion"}</div>
-      {error && <div className="form-error"><AlertTriangle size={16} /> {error}</div>}
-    </form>
+    <section className="login-brand">
+      <div>
+        <p>Cuenca, Ecuador</p>
+        <div className="login-wordmark"><img src="/wild-incas-brand.png" alt="Wild Incas" /></div>
+        <h2>Cada llegada cuenta. Hagamos de hoy una estadia memorable.</h2>
+        <small>Reservas, habitaciones y administracion hotelera en una operacion clara.</small>
+      </div>
+      <footer>
+        <span>Recepcion 24/7</span>
+        <span>Hospitalidad autentica</span>
+        <span>Datos protegidos</span>
+        <span>SIMOT v2.1</span>
+      </footer>
+    </section>
+    <div className="login-panel-wrap">
+      <form className="login-panel" onSubmit={submit}>
+        <div className="login-icon"><ShieldCheck size={22} /></div>
+        <p>ACCESO AL SISTEMA</p>
+        <h2>Bienvenido</h2>
+        <span className="login-subtitle">Ingresa tus credenciales para continuar</span>
+        <Field label="Usuario" value={values.username} onChange={(username) => setValues({ ...values, username })} autoComplete="username" />
+        <Field label="Contrasena" type="password" value={values.password} onChange={(password) => setValues({ ...values, password })} autoComplete="current-password" />
+        <button className="primary full" disabled={busy || !values.username.trim() || !values.password}>
+          {busy ? "Conectando con la operacion..." : "Ingresar al sistema"}
+        </button>
+        <div className={`login-connection ${warming ? "warming" : "ready"}`}>
+          <i />{warming ? "Preparando servicios en la nube..." : "Servicios listos. Puedes ingresar."}
+        </div>
+        {error && <div className="form-error"><AlertTriangle size={16} /> {error}</div>}
+      </form>
+    </div>
   </div>;
 }
 
@@ -702,16 +725,34 @@ function Employees({ data, reload, notify }) {
     if (!result.ok) return;
     notify(result.value.notification?.status === "sent" ? "Empleado creado y acceso aceptado por Brevo" : "Empleado y acceso creados; correo en cola", result.value.notification?.status === "sent" ? "success" : "warning"); setCreating(false); reload();
   }
-  async function update(values) { const result = await attempt(notify, () => request(`/employees/${values.id}`, { method: "PATCH", body: JSON.stringify(values) })); if (!result.ok) return; notify("Empleado y permisos de acceso actualizados"); setEditing(null); reload(); }
-  return <><div className="toolbar"><div className="shift-banner"><CalendarCheck size={19} /><span><small>Turno activo</small><b>{data.currentShift?.name || "Sin asignacion"} - {data.currentShift?.shift || ""}</b></span></div><button className="primary" onClick={() => setCreating(true)}><UserPlus size={17} /> Nuevo empleado</button></div><div className="employee-grid">{data.employees.map((item) => <article className="employee-card" key={item.id}><header><Avatar name={item.name} /><span><b>{item.name}</b><small>{item.role}</small></span><IconButton title="Editar empleado y permisos" onClick={() => setEditing(item)}><Pencil size={15} /></IconButton></header><dl><dt>Turno</dt><dd>{item.shift} - {item.hours}</dd><dt>Telefono</dt><dd>{item.phone || "-"}</dd><dt>Correo</dt><dd>{item.email}</dd><dt>Usuario</dt><dd>{item.username}</dd></dl><div className="permission-summary"><ShieldCheck size={15} /><b>{(item.modules || []).includes("all") ? "Acceso total" : `${(item.modules || []).length} modulos asignados`}</b></div><div className="module-tags">{moduleNames(item.modules).map((module) => <span key={module}>{module}</span>)}</div><footer><small>Desde {item.since}</small><Status status={item.status} /></footer></article>)}</div>{creating && <EmployeeModal roles={data.roles} onClose={() => setCreating(false)} onSubmit={create} />}{editing && <EmployeeModal employee={editing} roles={data.roles} onClose={() => setEditing(null)} onSubmit={update} />}</>;
+  async function update(values) {
+    const path = values._accessOnly ? "/employees/link-user" : `/employees/${values.id}`;
+    const method = values._accessOnly ? "POST" : "PATCH";
+    const result = await attempt(notify, () => request(path, { method, body: JSON.stringify(values) }));
+    if (!result.ok) return;
+    notify(values._accessOnly ? "Cuenta vinculada a una ficha laboral" : "Empleado y permisos de acceso actualizados"); setEditing(null); reload();
+  }
+  const employeeUsers = new Set(data.employees.map((item) => item.username));
+  const unlinked = data.users.filter((user) => !employeeUsers.has(user.username));
+  return <><div className="toolbar"><div className="shift-banner"><CalendarCheck size={19} /><span><small>Personal en jornada</small><b>{data.attendance.active?.length || 0} empleado(s) con entrada registrada</b></span></div><button className="primary" onClick={() => setCreating(true)}><UserPlus size={17} /> Nuevo empleado</button></div><div className="employee-grid">{data.employees.map((item) => <article className="employee-card" key={item.id}><header><Avatar name={item.name} /><span><b>{item.name}</b><small>{item.role}</small></span><IconButton title="Editar empleado y permisos" onClick={() => setEditing(item)}><Pencil size={15} /></IconButton></header><dl><dt>Modalidad</dt><dd>{item.shift} - {item.hours}</dd><dt>Estado de jornada</dt><dd>{item.attendance?.active ? `Entrada ${timeText(item.attendance.active.startedAt)}` : "Sin jornada activa"}</dd><dt>Telefono</dt><dd>{item.phone || "-"}</dd><dt>Correo</dt><dd>{item.email}</dd><dt>Usuario</dt><dd>{item.username}</dd></dl><div className="permission-summary"><ShieldCheck size={15} /><b>{(item.modules || []).includes("all") ? "Acceso total" : `${(item.modules || []).length} modulos asignados`}</b></div><div className="module-tags">{moduleNames(item.modules).map((module) => <span key={module}>{module}</span>)}</div><footer><small>Desde {item.since}</small><Status status={item.status} /></footer></article>)}</div>{unlinked.length > 0 && <section className="panel account-link-panel"><PanelHeader title="Cuentas pendientes de ficha laboral" />{unlinked.map((user) => <div className="user-row compact" key={user.id}><Avatar name={user.name} /><span><b>{user.name}</b><small>{user.username} - {user.email}</small></span><span className="user-access-copy"><b>Acceso creado</b><small>Falta informacion laboral y asistencia</small></span><button className="secondary" onClick={() => setEditing({ ...user, _accessOnly: true, shift: "Flexible", hours: "Horario flexible", role: data.roles.find((role) => role.id === user.roleId)?.name || user.role, modules: user.modules || [] })}>Crear ficha</button></div>)}</section>}<section className="panel attendance-panel"><PanelHeader title="Registro de entradas y salidas" /><div className="attendance-summary"><span><b>{data.attendance.active?.length || 0}</b><small>En jornada</small></span><span><b>{data.attendance.history?.length || 0}</b><small>Jornadas cerradas</small></span></div>{[...(data.attendance.active || []), ...(data.attendance.history || [])].slice(0, 30).map((entry) => <div className="attendance-row" key={`${entry.employeeId}-${entry.id}`}><span><b>{entry.employeeName}</b><small>{entry.username}</small></span><span><small>Entrada</small><b>{dateText(entry.startedAt, true)}</b></span><span><small>Salida</small><b>{entry.endedAt ? dateText(entry.endedAt, true) : "En jornada"}</b></span><span><small>Duracion</small><b>{formatDuration(entry.durationMinutes)}</b></span></div>)}{!(data.attendance.active?.length || data.attendance.history?.length) && <Empty icon={CalendarDays} text="Aun no existen marcaciones de asistencia" />}</section>{creating && <EmployeeModal roles={data.roles} onClose={() => setCreating(false)} onSubmit={create} />}{editing && <EmployeeModal employee={editing} roles={data.roles} onClose={() => setEditing(null)} onSubmit={update} />}</>;
 }
 
 function Access({ data, reload, notify }) {
-  const [creating, setCreating] = useState(false); const [editing, setEditing] = useState(null); const [testEmail, setTestEmail] = useState("");
-  async function create(values) { const result = await attempt(notify, () => request("/auth/users", { method: "POST", body: JSON.stringify(values) })); if (!result.ok) return; notify("Usuario creado"); setCreating(false); reload(); }
+  const [editing, setEditing] = useState(null);
+  const [campaign, setCampaign] = useState({ subject: "", title: "", message: "", actionLabel: "", actionUrl: "" });
+  const [sendingCampaign, setSendingCampaign] = useState(false);
   async function updateAccess(values) { const result = await attempt(notify, () => request(`/auth/users/${values.id}`, { method: "PATCH", body: JSON.stringify(values) })); if (!result.ok) return; window.dispatchEvent(new CustomEvent("simot:permissions-changed")); notify("Permisos aplicados inmediatamente, sin cerrar sesion"); setEditing(null); reload(); }
-  async function testMail() { const result = await attempt(notify, () => request("/notifications/test", { method: "POST", body: JSON.stringify({ to: testEmail }) })); if (!result.ok) return; notify(result.value.status === "sent" ? "Correo de prueba aceptado por Brevo" : `Correo en cola: ${result.value.error || result.value.status}`, result.value.status === "sent" ? "success" : "warning"); reload(); }
-  return <div className="access-layout"><section className="panel"><PanelHeader title="Usuarios y permisos individuales" action="Nuevo usuario" onClick={() => setCreating(true)} />{data.users.map((user) => <div className="user-row" key={user.id}><Avatar name={user.name} /><span><b>{user.name}</b><small>{user.username} - {user.email || "sin correo"}</small></span><span className="user-access-copy"><b>{data.roles.find((role) => role.id === user.roleId)?.name || user.role}</b><small>{(user.modules || []).includes("all") ? "Todos los modulos" : `${(user.modules || []).length} modulos habilitados`}</small></span><Status status={user.status} /><IconButton title="Asignar o quitar modulos" onClick={() => setEditing(user)}><UserCog size={16} /></IconButton></div>)}</section><section className="panel"><PanelHeader title="Plantillas de roles" />{data.roles.map((role) => <article className="role-row" key={role.id}><header><b>{role.name}</b><small>{role.modules.includes("all") ? "Acceso total" : `${role.modules.length} permisos`}</small></header><p>{role.description}</p><div className="module-tags">{moduleNames(role.modules).map((module) => <span key={module}>{module}</span>)}</div></article>)}<div className="email-test"><Field label="Prueba de correo Brevo" value={testEmail} placeholder="correo@ejemplo.com" onChange={setTestEmail} /><button className="primary" disabled={!testEmail} onClick={testMail}><Mail size={16} /> Enviar prueba</button><small>API: {data.emailConfig.apiConfigured ? "configurada" : "pendiente"} - SMTP: {data.emailConfig.smtpConfigured ? "configurado" : "pendiente"}</small></div></section>{creating && <UserModal roles={data.roles} onClose={() => setCreating(false)} onSubmit={create} />}{editing && <UserAccessModal user={editing} roles={data.roles} onClose={() => setEditing(null)} onSubmit={updateAccess} />}</div>;
+  async function sendCampaign() {
+    setSendingCampaign(true);
+    const result = await attempt(notify, () => request("/notifications/campaigns", { method: "POST", body: JSON.stringify(campaign), timeout: 30000 }));
+    setSendingCampaign(false);
+    if (!result.ok) return;
+    notify(`Campana ${result.value.campaignId}: ${result.value.queued} correo(s) en cola`);
+    setCampaign({ subject: "", title: "", message: "", actionLabel: "", actionUrl: "" }); reload();
+  }
+  const linked = new Set(data.employees.map((item) => item.username));
+  const recipientCount = new Set(data.guests.map((guest) => String(guest.email || "").trim().toLowerCase()).filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))).size;
+  return <div className="access-layout"><section className="panel"><PanelHeader title="Cuentas y permisos individuales" />{data.users.map((user) => <div className="user-row" key={user.id}><Avatar name={user.name} /><span><b>{user.name}</b><small>{user.username} - {user.email || "sin correo"}</small></span><span className="user-access-copy"><b>{data.roles.find((role) => role.id === user.roleId)?.name || user.role}</b><small>{linked.has(user.username) ? "Vinculado a empleado" : "Cuenta sin ficha laboral"} - {(user.modules || []).includes("all") ? "todos los modulos" : `${(user.modules || []).length} modulos`}</small></span><Status status={user.status} /><IconButton title="Asignar o quitar modulos" onClick={() => setEditing(user)}><UserCog size={16} /></IconButton></div>)}</section><section className="panel campaign-panel"><PanelHeader title="Comunicacion con huespedes" /><div className="campaign-audience"><Users size={18} /><span><b>{recipientCount} destinatario(s)</b><small>Huespedes registrados con correo valido</small></span></div><Field label="Asunto del correo" value={campaign.subject} onChange={(subject) => setCampaign({ ...campaign, subject })} placeholder="Ej. Beneficio especial para tu proxima visita" /><Field label="Titulo" value={campaign.title} onChange={(title) => setCampaign({ ...campaign, title })} placeholder="Novedades de Wild Incas" /><Field label="Mensaje" type="textarea" value={campaign.message} onChange={(message) => setCampaign({ ...campaign, message })} placeholder="Escriba la promocion, evento o novedad del hotel" /><div className="form-grid"><Field label="Texto del enlace (opcional)" value={campaign.actionLabel} onChange={(actionLabel) => setCampaign({ ...campaign, actionLabel })} /><Field label="Enlace HTTPS (opcional)" type="url" value={campaign.actionUrl} onChange={(actionUrl) => setCampaign({ ...campaign, actionUrl })} /></div><button className="primary full" disabled={sendingCampaign || !recipientCount || !campaign.subject.trim() || !campaign.message.trim()} onClick={sendCampaign}><Send size={16} /> {sendingCampaign ? "Preparando envios..." : `Enviar a ${recipientCount} huesped(es)`}</button><small className="provider-state">Brevo API: {data.emailConfig.apiConfigured ? "configurada" : "pendiente"}. Cada destinatario recibe un envio unico y reintentable.</small><div className="campaign-history"><h4>Ultimas campanas</h4>{data.campaigns.slice(0, 5).map((item) => <div key={item.id}><span><b>{item.subject}</b><small>{item.id}</small></span><span><b>{item.sent}/{item.total}</b><small>{item.pending} pendiente(s), {item.failed} fallido(s)</small></span></div>)}{!data.campaigns.length && <p>Aun no se han enviado campanas.</p>}</div></section>{editing && <UserAccessModal user={editing} roles={data.roles} onClose={() => setEditing(null)} onSubmit={updateAccess} />}</div>;
 }
 
 function ReservationModal({ reservation, initialGuest, rooms, reservations, onClose, onSubmit }) {
@@ -924,6 +965,7 @@ function moduleNames(modules = []) {
   return modules.includes("all") ? ["Todos los modulos"] : modules.map((id) => permissionOptions.find((item) => item.id === id)?.label || legacyLabels[id] || id);
 }
 function paymentSummary(payments, reservationId, total) { const paid = paymentTotal(payments, reservationId); return { paid, balance: Number(Math.max(0, Number(total || 0) - paid).toFixed(2)), overpaid: Number(Math.max(0, paid - Number(total || 0)).toFixed(2)) }; }
+function formatDuration(minutes) { const value = Math.max(0, Number(minutes || 0)); const hours = Math.floor(value / 60); const rest = value % 60; return hours ? `${hours} h ${rest} min` : `${rest} min`; }
 function isOverdueStay(item) {
   if (item.status !== "checked_in" || !item.checkOut) return false;
   const departure = new Date(`${item.checkOut}T${item.exitTime || "11:00"}:00`);
