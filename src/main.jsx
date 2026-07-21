@@ -360,7 +360,6 @@ function Login({ onLogin }) {
   return <div className="login-page">
     <section className="login-brand">
       <div>
-        <img className="lb-logo" src="/wild-incas-brand.png" alt="Wild Incas" />
         <p className="lb-name">Wild Incas Hostal</p>
         <p className="lb-tagline">Sistema de gestion hotelera para el equipo de operaciones.</p>
         <div className="lb-pills">
@@ -372,7 +371,7 @@ function Login({ onLogin }) {
     </section>
     <div className="login-panel-wrap">
       <form className="login-panel" onSubmit={submit}>
-        <div className="login-icon"><ShieldCheck size={20} /></div>
+        <img className="login-logo-top" src="/wild-incas-brand.png" alt="Wild Incas" />
         <p>ACCESO AL SISTEMA</p>
         <h2>Iniciar sesion</h2>
         <span className="login-subtitle">Ingresa con tus credenciales de operacion</span>

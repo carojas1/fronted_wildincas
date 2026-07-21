@@ -256,68 +256,83 @@ main { min-width: 0; padding: 28px 34px 56px; }
 .login-page {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 340px 1fr;
-  background: #f4f3f0;
+  grid-template-columns: 1fr 460px;
+  background: var(--charcoal);
 }
 .login-brand {
-  background: var(--charcoal);
-  padding: 40px 36px;
+  position: relative;
+  background-image: url('/wild-incas-brand.png');
+  background-size: cover;
+  background-position: center top;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  border-right: 4px solid var(--burgundy);
+  justify-content: flex-end;
+  padding: 52px;
+  border-right: 0;
 }
-.login-brand .lb-logo {
-  width: 100%;
-  height: 70px;
-  object-fit: contain;
-  border-radius: 6px;
-  display: block;
-  background: #ffffff;
-  padding: 8px;
-  margin-bottom: 28px;
+.login-brand::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(10,27,20,.88) 0%, rgba(10,27,20,.45) 55%, rgba(10,27,20,.18) 100%);
+  z-index: 0;
 }
-.login-brand .lb-tagline {
-  color: rgba(255,255,255,.55);
-  font-size: 13px;
-  line-height: 1.7;
-  margin: 0;
-}
+.login-brand > div { position: relative; z-index: 1; }
+.login-brand .lb-logo { display: none; }
 .login-brand .lb-name {
   color: #d4a96a;
   font-size: 10px;
   font-weight: 900;
-  letter-spacing: .12em;
+  letter-spacing: .18em;
   text-transform: uppercase;
-  margin: 0 0 8px;
+  margin: 0 0 12px;
+}
+.login-brand .lb-tagline {
+  color: rgba(255,255,255,.88);
+  font-size: 20px;
+  line-height: 1.5;
+  margin: 0 0 28px;
+  font-weight: 700;
+  max-width: 420px;
 }
 .login-brand .lb-pills {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 32px;
+  margin-top: 0;
 }
 .login-brand .lb-pills span {
-  border: 1px solid rgba(255,255,255,.15);
+  border: 1px solid rgba(255,255,255,.3);
   border-radius: 4px;
-  padding: 5px 10px;
-  color: rgba(255,255,255,.45);
+  padding: 6px 14px;
+  color: rgba(255,255,255,.75);
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: .06em;
+  letter-spacing: .08em;
+  background: rgba(255,255,255,.08);
+  backdrop-filter: blur(4px);
 }
 .login-panel-wrap {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 48px 32px;
+  padding: 48px 40px;
+  background: white;
 }
 .login-panel {
   width: 100%;
-  max-width: 380px;
+  max-width: 360px;
   display: grid;
   gap: 16px;
+}
+.login-logo-top {
+  width: 100%;
+  max-height: 72px;
+  object-fit: contain;
+  display: block;
+  margin-bottom: 4px;
 }
 .login-icon {
   width: 44px;
@@ -339,12 +354,13 @@ main { min-width: 0; padding: 28px 34px 56px; }
 .login-panel h2 { margin: 0 0 2px; font-size: 28px; color: var(--charcoal); }
 .login-panel .login-subtitle { margin: -8px 0 4px; color: #8a9691; font-size: 13px; }
 .login-panel .primary {
-  min-height: 46px;
+  min-height: 48px;
   font-size: 14px;
   border-radius: 7px;
   background: var(--charcoal);
   border-color: var(--charcoal);
   letter-spacing: .01em;
+  margin-top: 4px;
 }
 .login-panel .primary:hover:not(:disabled) { background: #3a3430; }
 .login-connection {
@@ -352,7 +368,7 @@ main { min-width: 0; padding: 28px 34px 56px; }
   align-items: center;
   gap: 8px;
   padding: 9px 13px;
-  background: white;
+  background: #f8faf9;
   border: 1px solid var(--line);
   border-radius: 7px;
   color: #3d6455;
